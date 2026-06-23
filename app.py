@@ -40,6 +40,7 @@ from flask import Flask, jsonify, request
 from src.auth import require_token
 from src.logger import log
 from src import task_store
+import src.branch_config as branch_config
 
 app = Flask(__name__)
 task_store.init_db()
@@ -165,7 +166,7 @@ def run():
         try:
             repo_root = Path(body["repo"])
             branch = body["branch"]
-            base_branch = body.get("base_branch", "develop")
+            base_branch = body.get("base_branch") or branch_config.base_branch()
             target = body.get("target", "developer")
             file_paths = [Path(f) for f in body["files"]]
             ticket = body["ticket"]
@@ -220,6 +221,34 @@ def tasks():
     limit = min(int(request.args.get("limit", 50)), 200)
     ticket = request.args.get("ticket") or None
     return jsonify(task_store.get_recent(limit, ticket=ticket))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Branch config endpoints (future UI layer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/config/branches")
+@require_token
+def get_branch_config():
+    """Return the active branch registry."""
+    return jsonify(branch_config.get_registry())
+
+
+@app.put("/config/branches")
+@require_token
+def put_branch_config():
+    """Replace the branch registry and persist to disk.
+
+    Body: JSON object with branch names as keys. Unknown fields are merged with
+    defaults so existing entries not in the body are preserved.
+    Each entry supports: label, environment, url, is_base (all optional).
+    """
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+    branch_config.save(body)
+    log("CFG", f"branch config updated: {list(body.keys())}")
+    return jsonify(branch_config.get_registry())
 
 
 # Azure endpoints are defined in src/azure_client.py and registered here

@@ -17,8 +17,7 @@ import subprocess
 from pathlib import Path
 
 from src.logger import log
-
-_FEATURE_BASE_BRANCH = "develop"
+import src.branch_config as branch_config
 
 
 def aux_branch_name(feature_branch: str, target: str) -> str:
@@ -34,11 +33,13 @@ def aux_branch_name(feature_branch: str, target: str) -> str:
     return f"{feature_branch}_{target}_auxiliar"
 
 
-def create_feature_branch(repo_root: Path, branch_name: str, base_branch: str = _FEATURE_BASE_BRANCH) -> None:
+def create_feature_branch(repo_root: Path, branch_name: str, base_branch: str | None = None) -> None:
     """Create and checkout *branch_name* from *base_branch* in *repo_root*.
 
-    Default base is 'develop' — feature/fix branches are always cut from develop.
+    Default base comes from branch_config.base_branch() (the branch marked is_base=True).
     """
+    if base_branch is None:
+        base_branch = branch_config.base_branch()
     r = str(Path(repo_root).resolve())
     log("GIT", f"fetch origin/{base_branch}")
     subprocess.run(["git", "-C", r, "fetch", "origin", base_branch], check=True)

@@ -50,6 +50,9 @@ Ejemplo real (PR-2505):
 
 ---
 
+- [x] `src/branch_config.py` — diccionario dinámico de ramas (label, env, url, is_base)
+- [x] `GET /config/branches` + `PUT /config/branches` — configurable vía API (futura UI)
+
 ## Pendiente / nice-to-have
 
 - [ ] `docker-compose.yml` para levantar `code-agent-mcp` + `claude-mcp-jira` juntos en local
