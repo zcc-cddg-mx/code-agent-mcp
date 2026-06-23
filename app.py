@@ -54,7 +54,11 @@ Swagger(app, template={
     "swagger": "2.0",
     "info": {
         "title": "Code Agent MCP",
-        "description": "Generic HTTP agent for git operations and Azure DevOps PR management.",
+        "description": (
+            "Generic HTTP agent for git operations and Azure DevOps PR management.\n\n"
+            "**Auth:** incluir header `X-Agent-Token` en cada request "
+            "(valor de la variable de entorno `AGENT_TOKEN` del servidor)."
+        ),
         "version": "1.0.0",
     },
     "basePath": "/",
