@@ -126,16 +126,42 @@ def classify_branches(branches: list[str]) -> dict:
     return {"integration": integration, "feature": feature, "other": other}
 
 
+def extract_project_info(org: str, project_name: str, metadata: dict) -> dict:
+    """Extract project-level fields from a repo metadata response.
+
+    The Azure DevOps repo endpoint embeds the parent project object, so no
+    extra API call is needed.
+    Returns a dict ready to be stored via project_store.upsert().
+    """
+    from src.project_store import slug
+    p = metadata.get("project", {})
+    return {
+        "project_id":       slug(org, project_name),
+        "org":               org,
+        "name":              project_name,
+        "azure_project_id":  p.get("id"),
+        "description":       p.get("description"),
+        "visibility":        p.get("visibility"),
+        "state":             p.get("state"),
+        "web_url":           f"https://dev.azure.com/{org}/{project_name}",
+        "last_update_time":  p.get("lastUpdateTime"),
+    }
+
+
 def inspect(git_url: str, pat: str) -> dict:
     """Full inspection of a repo: parse URL, fetch metadata, list branches.
 
-    Returns a dict ready to be stored via repo_store.upsert().
+    Returns:
+      {
+        "repo":    dict ready for repo_store.upsert(),
+        "project": dict ready for project_store.upsert(),
+      }
     """
     parsed = parse_azure_url(git_url)
-    org, project, repo_name = parsed["org"], parsed["project"], parsed["repo"]
+    org, project_name, repo_name = parsed["org"], parsed["project"], parsed["repo"]
 
-    # Azure DevOps metadata
-    metadata = fetch_azure_metadata(org, project, repo_name, pat)
+    # Azure DevOps metadata (includes embedded project object)
+    metadata = fetch_azure_metadata(org, project_name, repo_name, pat)
 
     # Remote branches via git ls-remote
     clean_url = parsed["clean_url"]
@@ -147,11 +173,13 @@ def inspect(git_url: str, pat: str) -> dict:
 
     known = classify_branches(branches)
 
-    return {
+    from src.project_store import slug as project_slug
+    repo_info = {
         "name":            repo_name,
         "git_url":         clean_url,
         "org":             org,
-        "project":         project,
+        "project":         project_name,
+        "project_id":      project_slug(org, project_name),
         "azure_repo_id":   metadata.get("id"),
         "default_branch":  metadata.get("defaultBranch", "").removeprefix("refs/heads/"),
         "web_url":         metadata.get("webUrl"),
@@ -159,3 +187,6 @@ def inspect(git_url: str, pat: str) -> dict:
         "known_branches":  known["integration"],
         "size_kb":         metadata.get("size"),
     }
+    project_info = extract_project_info(org, project_name, metadata)
+
+    return {"repo": repo_info, "project": project_info}

@@ -19,26 +19,27 @@ _lock = threading.Lock()
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS repos (
-    repo_id          TEXT PRIMARY KEY,
-    name             TEXT NOT NULL,
-    git_url          TEXT NOT NULL,
-    org              TEXT,
-    project          TEXT,
-    azure_repo_id    TEXT,
-    default_branch   TEXT,
-    web_url          TEXT,
-    branches         TEXT,
-    known_branches   TEXT,
-    size_kb          INTEGER,
+    repo_id           TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    git_url           TEXT NOT NULL,
+    org               TEXT,
+    project           TEXT,
+    project_id        TEXT,
+    azure_repo_id     TEXT,
+    default_branch    TEXT,
+    web_url           TEXT,
+    branches          TEXT,
+    known_branches    TEXT,
+    size_kb           INTEGER,
     last_inspected_at TEXT,
-    created_at       TEXT NOT NULL,
-    updated_at       TEXT NOT NULL
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
 )
 """
 
 _JSON_FIELDS = {"branches", "known_branches"}
 _ALL_FIELDS = [
-    "repo_id", "name", "git_url", "org", "project",
+    "repo_id", "name", "git_url", "org", "project", "project_id",
     "azure_repo_id", "default_branch", "web_url",
     "branches", "known_branches", "size_kb",
     "last_inspected_at", "created_at", "updated_at",

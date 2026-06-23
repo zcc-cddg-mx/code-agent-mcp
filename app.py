@@ -41,11 +41,13 @@ from src.auth import require_token
 from src.logger import log
 from src import task_store
 from src import repo_store
+from src import project_store
 import src.branch_config as branch_config
 
 app = Flask(__name__)
 task_store.init_db()
 repo_store.init_db()
+project_store.init_db()
 
 _RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 task_store.cleanup_old_records(days=_RETENTION_DAYS)
@@ -294,21 +296,23 @@ def register_repo():
 
     now = _now_iso()
     try:
-        info = inspect(git_url, pat)
+        result = inspect(git_url, pat)
     except Exception as exc:
         log("REPO", f"inspection failed for {repo_name}: {exc}")
         return jsonify({"error": f"Inspection failed: {exc}"}), 502
 
+    # Upsert project (idempotent — same project may already exist from another repo)
+    project_store.upsert(result["project"], now)
+    log("REPO", f"project '{result['project']['project_id']}' registered/updated")
+
     repo_id = str(_uuid.uuid4())[:8]
-    record = {
-        "repo_id":            repo_id,
-        "last_inspected_at":  now,
-        "created_at":         now,
-        **info,
-    }
+    record = {"repo_id": repo_id, "last_inspected_at": now, "created_at": now, **result["repo"]}
     repo_store.upsert(record, now)
     log("REPO", f"registered '{repo_name}' (id={repo_id})")
-    return jsonify(repo_store.get(repo_id)), 201
+    return jsonify({
+        "repo":    repo_store.get(repo_id),
+        "project": project_store.get(result["project"]["project_id"]),
+    }), 201
 
 
 @app.get("/repos")
@@ -344,15 +348,19 @@ def refresh_repo(repo_name: str):
 
     now = _now_iso()
     try:
-        info = inspect(repo["git_url"], pat)
+        result = inspect(repo["git_url"], pat)
     except Exception as exc:
         log("REPO", f"refresh failed for {repo_name}: {exc}")
         return jsonify({"error": f"Inspection failed: {exc}"}), 502
 
-    record = {"repo_id": repo["repo_id"], "last_inspected_at": now, **info}
+    project_store.upsert(result["project"], now)
+    record = {"repo_id": repo["repo_id"], "last_inspected_at": now, **result["repo"]}
     repo_store.upsert(record, now)
     log("REPO", f"refreshed '{repo_name}'")
-    return jsonify(repo_store.get(repo["repo_id"]))
+    return jsonify({
+        "repo":    repo_store.get(repo["repo_id"]),
+        "project": project_store.get(result["project"]["project_id"]),
+    })
 
 
 @app.delete("/repos/<repo_name>")
@@ -365,6 +373,42 @@ def delete_repo(repo_name: str):
     repo_store.delete(repo["repo_id"])
     log("REPO", f"deleted '{repo_name}'")
     return jsonify({"deleted": repo_name})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project registry endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/projects")
+@require_token
+def list_projects():
+    """List all registered projects."""
+    projects = project_store.list_all()
+    # Enrich each project with its repo list
+    all_repos = repo_store.list_all()
+    repos_by_project: dict[str, list] = {}
+    for r in all_repos:
+        pid = r.get("project_id")
+        if pid:
+            repos_by_project.setdefault(pid, []).append(r["name"])
+    for p in projects:
+        p["repos"] = repos_by_project.get(p["project_id"], [])
+    return jsonify(projects)
+
+
+@app.get("/projects/<path:project_id>")
+@require_token
+def get_project(project_id: str):
+    """Get a project by its ID ({org}/{name}).
+
+    Example: GET /projects/ZurichInsurance-EC/Oficina-Virtual-ZEC
+    """
+    project = project_store.get(project_id)
+    if not project:
+        return jsonify({"error": f"Project '{project_id}' not found"}), 404
+    repos = [r["name"] for r in repo_store.list_all() if r.get("project_id") == project_id]
+    project["repos"] = repos
+    return jsonify(project)
 
 
 # Azure endpoints are defined in src/azure_client.py and registered here

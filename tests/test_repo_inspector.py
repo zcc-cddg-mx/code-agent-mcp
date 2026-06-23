@@ -64,6 +64,14 @@ def _mock_azure_metadata():
         "defaultBranch": "refs/heads/develop",
         "webUrl":        "https://dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat",
         "size":          86605,
+        "project": {
+            "id":             "c720df0b-0000-0000-0000-000000000000",
+            "name":           "Oficina-Virtual-ZEC",
+            "description":    "Portal Brokers/Clientes",
+            "visibility":     "private",
+            "state":          "wellFormed",
+            "lastUpdateTime": "2026-05-29T15:08:25.077Z",
+        },
     }
     return m
 
@@ -90,13 +98,22 @@ def test_inspect_happy_path():
             pat="fake-pat",
         )
 
-    assert result["name"] == "ov-arizona-restat"
-    assert result["default_branch"] == "develop"
-    assert result["size_kb"] == 86605
-    assert "develop" in result["known_branches"]
-    assert "developer" in result["known_branches"]
-    assert "test" in result["known_branches"]
-    assert "feature/RITM2521020_relatividades" in result["branches"]["feature"]
+    repo = result["repo"]
+    assert repo["name"] == "ov-arizona-restat"
+    assert repo["default_branch"] == "develop"
+    assert repo["size_kb"] == 86605
+    assert repo["project_id"] == "ZurichInsurance-EC/Oficina-Virtual-ZEC"
+    assert "develop" in repo["known_branches"]
+    assert "developer" in repo["known_branches"]
+    assert "test" in repo["known_branches"]
+    assert "feature/RITM2521020_relatividades" in repo["branches"]["feature"]
+
+    project = result["project"]
+    assert project["project_id"] == "ZurichInsurance-EC/Oficina-Virtual-ZEC"
+    assert project["name"] == "Oficina-Virtual-ZEC"
+    assert project["org"] == "ZurichInsurance-EC"
+    assert project["visibility"] == "private"
+    assert project["state"] == "wellFormed"
 
 
 def test_inspect_ls_remote_failure_still_returns_record():
@@ -111,8 +128,9 @@ def test_inspect_ls_remote_failure_still_returns_record():
             pat="fake-pat",
         )
 
-    assert result["name"] == "ov-arizona-restat"
-    assert result["branches"] == {"integration": [], "feature": [], "other": []}
+    assert result["repo"]["name"] == "ov-arizona-restat"
+    assert result["repo"]["branches"] == {"integration": [], "feature": [], "other": []}
+    assert result["project"]["name"] == "Oficina-Virtual-ZEC"
 
 
 def test_inspect_azure_api_error():
