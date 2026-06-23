@@ -38,7 +38,9 @@ Ejemplo real (PR-2505):
 
 ---
 
-## En `claude-mcp-jira` (`/home/idavid/dev/claude/claude-mcp-jira`)
+## Futura implementación — `claude-mcp-jira` (`/home/idavid/dev/claude/claude-mcp-jira`)
+
+> Pendiente hasta completar la verificación funcional de este agente.
 
 - [ ] `service/clients/code_agent_client.py` — HTTP client para los 4 endpoints del agente
 - [ ] MCP tools (Fase 11):
