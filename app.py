@@ -40,10 +40,12 @@ from flask import Flask, jsonify, request
 from src.auth import require_token
 from src.logger import log
 from src import task_store
+from src import repo_store
 import src.branch_config as branch_config
 
 app = Flask(__name__)
 task_store.init_db()
+repo_store.init_db()
 
 _RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 task_store.cleanup_old_records(days=_RETENTION_DAYS)
@@ -249,6 +251,120 @@ def put_branch_config():
     branch_config.save(body)
     log("CFG", f"branch config updated: {list(body.keys())}")
     return jsonify(branch_config.get_registry())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Repository registry endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/repos")
+@require_token
+def register_repo():
+    """Register a new repository and inspect it immediately.
+
+    Body:
+      { "git_url": "https://ZurichInsurance-EC@dev.azure.com/.../ov-arizona-restat" }
+
+    Reads AZURE_PAT from env for inspection. Returns the registered repo record.
+    """
+    from src.repo_inspector import inspect, parse_azure_url
+    import uuid as _uuid
+
+    body = request.get_json(silent=True) or {}
+    git_url = (body.get("git_url") or "").strip()
+    if not git_url:
+        return jsonify({"error": "git_url is required"}), 400
+
+    pat = os.environ.get("AZURE_PAT", "")
+    if not pat:
+        return jsonify({"error": "AZURE_PAT not configured on server"}), 500
+
+    # Parse URL first to get the canonical name
+    try:
+        parsed = parse_azure_url(git_url)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    repo_name = parsed["repo"]
+
+    # Reject duplicates
+    existing = repo_store.get_by_name(repo_name)
+    if existing:
+        return jsonify({"error": f"Repository '{repo_name}' already registered", "repo": existing}), 409
+
+    now = _now_iso()
+    try:
+        info = inspect(git_url, pat)
+    except Exception as exc:
+        log("REPO", f"inspection failed for {repo_name}: {exc}")
+        return jsonify({"error": f"Inspection failed: {exc}"}), 502
+
+    repo_id = str(_uuid.uuid4())[:8]
+    record = {
+        "repo_id":            repo_id,
+        "last_inspected_at":  now,
+        "created_at":         now,
+        **info,
+    }
+    repo_store.upsert(record, now)
+    log("REPO", f"registered '{repo_name}' (id={repo_id})")
+    return jsonify(repo_store.get(repo_id)), 201
+
+
+@app.get("/repos")
+@require_token
+def list_repos():
+    """List all registered repositories."""
+    return jsonify(repo_store.list_all())
+
+
+@app.get("/repos/<repo_name>")
+@require_token
+def get_repo(repo_name: str):
+    """Get a registered repository by name."""
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+    return jsonify(repo)
+
+
+@app.post("/repos/<repo_name>/refresh")
+@require_token
+def refresh_repo(repo_name: str):
+    """Re-inspect a registered repository and update its record."""
+    from src.repo_inspector import inspect
+
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+
+    pat = os.environ.get("AZURE_PAT", "")
+    if not pat:
+        return jsonify({"error": "AZURE_PAT not configured on server"}), 500
+
+    now = _now_iso()
+    try:
+        info = inspect(repo["git_url"], pat)
+    except Exception as exc:
+        log("REPO", f"refresh failed for {repo_name}: {exc}")
+        return jsonify({"error": f"Inspection failed: {exc}"}), 502
+
+    record = {"repo_id": repo["repo_id"], "last_inspected_at": now, **info}
+    repo_store.upsert(record, now)
+    log("REPO", f"refreshed '{repo_name}'")
+    return jsonify(repo_store.get(repo["repo_id"]))
+
+
+@app.delete("/repos/<repo_name>")
+@require_token
+def delete_repo(repo_name: str):
+    """Remove a repository from the registry."""
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+    repo_store.delete(repo["repo_id"])
+    log("REPO", f"deleted '{repo_name}'")
+    return jsonify({"deleted": repo_name})
 
 
 # Azure endpoints are defined in src/azure_client.py and registered here

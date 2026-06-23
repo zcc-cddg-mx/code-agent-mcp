@@ -54,6 +54,10 @@ Ejemplo real (PR-2505):
 
 - [x] `src/branch_config.py` — diccionario dinámico de ramas (label, env, url, is_base)
 - [x] `GET /config/branches` + `PUT /config/branches` — configurable vía API (futura UI)
+- [x] `src/repo_store.py` — tabla `repos` en SQLite
+- [x] `src/repo_inspector.py` — parsea URL Azure DevOps, `git ls-remote`, clasifica ramas
+- [x] `POST /repos` — registrar repo + inspección inmediata
+- [x] `GET /repos` / `GET /repos/<name>` / `POST /repos/<name>/refresh` / `DELETE /repos/<name>`
 
 ## Pendiente / nice-to-have
 
