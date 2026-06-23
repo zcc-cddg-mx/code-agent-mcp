@@ -9,7 +9,8 @@ Schema of each entry:
     "label":       human-readable name shown in logs and API responses,
     "environment": deployed environment name (or null),
     "url":         environment URL (or null),
-    "is_base":     true if feature/fix branches are cut from this branch
+    "is_base":     true if feature/fix branches are cut from this branch,
+    "role":        "base" | "integration"  — logical use of the branch
   }
 """
 
@@ -25,24 +26,28 @@ _DEFAULTS: dict[str, dict] = {
         "environment": "DEV (UAT)",
         "url":         "https://uat-oficinavirtual.zurichseguros.com.ec",
         "is_base":     False,
+        "role":        "integration",
     },
     "test": {
         "label":       "pruebas",
         "environment": "Test / Preprod",
         "url":         "https://preprod-oficinavirtual.zurichseguros.com.ec",
         "is_base":     False,
+        "role":        "integration",
     },
     "develop": {
         "label":       "producción (pre)",
         "environment": None,
         "url":         None,
         "is_base":     True,
+        "role":        "base",
     },
     "main": {
         "label":       "producción (desplegado)",
         "environment": "Producción",
         "url":         "https://oficinavirtual.zurichseguros.com.ec",
         "is_base":     False,
+        "role":        "integration",
     },
 }
 
@@ -95,6 +100,12 @@ def base_branch() -> str:
         if meta.get("is_base"):
             return name
     return "develop"
+
+
+def role(branch: str) -> str | None:
+    """Return the logical role of *branch* from the global registry, or None if unknown."""
+    entry = get(branch)
+    return entry.get("role") if entry else None
 
 
 def known_targets() -> list[str]:

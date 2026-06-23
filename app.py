@@ -96,6 +96,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _invert_roles(branch_roles: dict) -> dict:
+    """Invert {branch: role} → {role: [branches]} for readable display."""
+    result: dict[str, list] = {}
+    for branch, role in branch_roles.items():
+        result.setdefault(role, []).append(branch)
+    return result
+
+
 def _notify_callback(callback_url: str, task: dict) -> None:
     """POST task result to *callback_url* with up to 3 retries (exponential backoff).
 
@@ -535,7 +543,64 @@ def get_repo(repo_name: str):
     repo = repo_store.get_by_name(repo_name)
     if not repo:
         return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+    repo["branches_by_role"] = _invert_roles(repo.get("branch_roles") or {})
     return jsonify(repo)
+
+
+@app.patch("/repos/<repo_name>/branches/<path:branch_name>")
+@require_token
+def set_branch_role(repo_name: str, branch_name: str):
+    """Set the logical role of a branch for a specific repository.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ensurance-old-web
+      - in: path
+        name: branch_name
+        type: string
+        required: true
+        example: master
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [role]
+          properties:
+            role:
+              type: string
+              enum: [base, integration, feature, other]
+              example: integration
+    responses:
+      200:
+        description: Updated branch roles for the repo
+        schema: {type: object}
+      400:
+        description: Invalid role value
+      404:
+        description: Repository not found
+    """
+    _VALID_ROLES = {"base", "integration", "feature", "other"}
+    body = request.get_json(silent=True) or {}
+    role = (body.get("role") or "").strip()
+    if role not in _VALID_ROLES:
+        return jsonify({"error": f"role must be one of: {', '.join(sorted(_VALID_ROLES))}"}), 400
+
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+
+    now = _now_iso()
+    repo_store.set_branch_role(repo["repo_id"], branch_name, role, now)
+    log("REPO", f"'{repo_name}' branch '{branch_name}' role set to '{role}'")
+
+    updated = repo_store.get(repo["repo_id"])
+    updated["branches_by_role"] = _invert_roles(updated.get("branch_roles") or {})
+    return jsonify(updated)
 
 
 @app.post("/repos/<repo_name>/refresh")

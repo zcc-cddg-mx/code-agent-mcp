@@ -18,6 +18,7 @@ _INSPECT_RESULT = {
         "web_url":        "https://dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat",
         "branches":       {"integration": ["develop", "developer"], "feature": [], "other": []},
         "known_branches": ["develop", "developer"],
+        "branch_roles":   {"develop": "base", "developer": "integration"},
         "size_kb":        86605,
     },
     "project": {
@@ -44,6 +45,7 @@ _INSPECT_RESULT_2 = {
         "web_url":        "https://dev.azure.com/ZurichInsurance-EC/Zenith-ZEC/_git/client-control-orchestration-service",
         "branches":       {"integration": ["main", "develop"], "feature": [], "other": []},
         "known_branches": ["main", "develop"],
+        "branch_roles":   {"main": "integration", "develop": "base"},
         "size_kb":        12000,
     },
     "project": {
@@ -208,3 +210,50 @@ def test_get_project_by_id(client):
 
 def test_get_project_not_found(client):
     assert client.get("/projects/Org/NonExistent", headers=_HEADERS).status_code == 404
+
+
+# ─── PATCH /repos/<name>/branches/<branch> ───────────────────────────────────
+
+def test_set_branch_role(client):
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    resp = client.patch(
+        "/repos/ov-arizona-restat/branches/develop",
+        json={"role": "base"},
+        headers=_HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["branch_roles"]["develop"] == "base"
+    assert "base" in data["branches_by_role"]
+    assert "develop" in data["branches_by_role"]["base"]
+
+
+def test_set_branch_role_invalid(client):
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    resp = client.patch(
+        "/repos/ov-arizona-restat/branches/develop",
+        json={"role": "invalid-role"},
+        headers=_HEADERS,
+    )
+    assert resp.status_code == 400
+
+
+def test_set_branch_role_repo_not_found(client):
+    resp = client.patch(
+        "/repos/nonexistent/branches/main",
+        json={"role": "integration"},
+        headers=_HEADERS,
+    )
+    assert resp.status_code == 404
+
+
+def test_get_repo_includes_branches_by_role(client):
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    data = client.get("/repos/ov-arizona-restat", headers=_HEADERS).get_json()
+    assert "branches_by_role" in data

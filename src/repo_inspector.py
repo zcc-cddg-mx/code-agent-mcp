@@ -126,6 +126,31 @@ def classify_branches(branches: list[str]) -> dict:
     return {"integration": integration, "feature": feature, "other": other}
 
 
+def auto_assign_roles(branches: list[str]) -> dict[str, str]:
+    """Auto-detect the logical role of each branch for a specific repo.
+
+    Priority:
+    1. Branch is in the global branch_config registry → use its role field
+    2. Branch starts with feature/ or fix/ → "feature"
+    3. Branch is in _KNOWN_INTEGRATION_BRANCHES → "integration"
+    4. Otherwise → "other"
+
+    Returns a dict mapping branch name → role string.
+    """
+    roles: dict[str, str] = {}
+    for b in branches:
+        global_role = branch_config.role(b)
+        if global_role:
+            roles[b] = global_role
+        elif b.startswith(("feature/", "fix/")):
+            roles[b] = "feature"
+        elif b in _KNOWN_INTEGRATION_BRANCHES:
+            roles[b] = "integration"
+        else:
+            roles[b] = "other"
+    return roles
+
+
 def extract_project_info(org: str, project_name: str, metadata: dict) -> dict:
     """Extract project-level fields from a repo metadata response.
 
@@ -172,6 +197,7 @@ def inspect(git_url: str, pat: str) -> dict:
         branches = []
 
     known = classify_branches(branches)
+    branch_roles = auto_assign_roles(branches)
 
     from src.project_store import slug as project_slug
     repo_info = {
@@ -185,6 +211,7 @@ def inspect(git_url: str, pat: str) -> dict:
         "web_url":         metadata.get("webUrl"),
         "branches":        known,
         "known_branches":  known["integration"],
+        "branch_roles":    branch_roles,
         "size_kb":         metadata.get("size"),
     }
     project_info = extract_project_info(org, project_name, metadata)

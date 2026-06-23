@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS repos (
     web_url           TEXT,
     branches          TEXT,
     known_branches    TEXT,
+    branch_roles      TEXT,
     size_kb           INTEGER,
     last_inspected_at TEXT,
     created_at        TEXT NOT NULL,
@@ -37,11 +38,11 @@ CREATE TABLE IF NOT EXISTS repos (
 )
 """
 
-_JSON_FIELDS = {"branches", "known_branches"}
+_JSON_FIELDS = {"branches", "known_branches", "branch_roles"}
 _ALL_FIELDS = [
     "repo_id", "name", "git_url", "org", "project", "project_id",
     "azure_repo_id", "default_branch", "web_url",
-    "branches", "known_branches", "size_kb",
+    "branches", "known_branches", "branch_roles", "size_kb",
     "last_inspected_at", "created_at", "updated_at",
 ]
 
@@ -116,6 +117,27 @@ def list_all() -> list[dict]:
             "SELECT * FROM repos ORDER BY name ASC"
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def set_branch_role(repo_id: str, branch: str, role: str, now_iso: str) -> None:
+    """Update a single branch role in the branch_roles JSON dict for a repo."""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT branch_roles FROM repos WHERE repo_id = ?", (repo_id,)
+        ).fetchone()
+        if not row:
+            return
+        current = {}
+        if row["branch_roles"]:
+            try:
+                current = json.loads(row["branch_roles"])
+            except (ValueError, TypeError):
+                pass
+        current[branch] = role
+        conn.execute(
+            "UPDATE repos SET branch_roles = ?, updated_at = ? WHERE repo_id = ?",
+            (json.dumps(current, ensure_ascii=False), now_iso, repo_id),
+        )
 
 
 def delete(repo_id: str) -> bool:

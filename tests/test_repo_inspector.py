@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
-from src.repo_inspector import parse_azure_url, classify_branches, inspect
+from src.repo_inspector import parse_azure_url, classify_branches, inspect, auto_assign_roles
 
 
 # ─── parse_azure_url ─────────────────────────────────────────────────────────
@@ -51,6 +51,37 @@ def test_classify_feature_and_fix():
     assert "feature/ZNRX-1_test" in result["feature"]
     assert "fix/INC001_bug" in result["feature"]
     assert "release/1.0" in result["other"]
+
+
+# ─── auto_assign_roles ───────────────────────────────────────────────────────
+
+def test_auto_assign_roles_known_branches():
+    roles = auto_assign_roles(["develop", "developer", "test", "main"])
+    assert roles["develop"] == "base"
+    assert roles["developer"] == "integration"
+    assert roles["test"] == "integration"
+    assert roles["main"] == "integration"
+
+
+def test_auto_assign_roles_feature_prefix():
+    roles = auto_assign_roles(["feature/ZNRX-123_test", "fix/INC001_bug"])
+    assert roles["feature/ZNRX-123_test"] == "feature"
+    assert roles["fix/INC001_bug"] == "feature"
+
+
+def test_auto_assign_roles_unknown_falls_back_to_other():
+    roles = auto_assign_roles(["release/1.0", "hotfix/urgent"])
+    assert roles["release/1.0"] == "other"
+    assert roles["hotfix/urgent"] == "other"
+
+
+def test_auto_assign_roles_mixed():
+    branches = ["develop", "developer", "feature/ZNRX-1", "release/2.0"]
+    roles = auto_assign_roles(branches)
+    assert roles["develop"] == "base"
+    assert roles["developer"] == "integration"
+    assert roles["feature/ZNRX-1"] == "feature"
+    assert roles["release/2.0"] == "other"
 
 
 # ─── inspect ─────────────────────────────────────────────────────────────────
@@ -107,6 +138,10 @@ def test_inspect_happy_path():
     assert "developer" in repo["known_branches"]
     assert "test" in repo["known_branches"]
     assert "feature/RITM2521020_relatividades" in repo["branches"]["feature"]
+    assert "branch_roles" in repo
+    assert repo["branch_roles"]["develop"] == "base"
+    assert repo["branch_roles"]["developer"] == "integration"
+    assert repo["branch_roles"]["feature/RITM2521020_relatividades"] == "feature"
 
     project = result["project"]
     assert project["project_id"] == "ZurichInsurance-EC/Oficina-Virtual-ZEC"
