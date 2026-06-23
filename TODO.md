@@ -79,12 +79,34 @@ Estado actual: servicio funcional con registro de repos/proyectos, roles de rama
 
 ---
 
+## Antes de producción
+
+- [ ] **Seguridad `repo_path`** — variable de entorno `ALLOWED_REPO_PATHS` (lista de prefijos permitidos); validar en `POST /azure/prepare-and-pr` y `POST /run` antes de ejecutar cualquier operación git
+  ```
+  ALLOWED_REPO_PATHS=/home/idavid/dev/ov,/repos
+  ```
+
+## Próximas fases
+
+- [ ] **Registro de PRs en SQLite** (`src/pr_store.py`, tabla `prs` separada de `tasks`):
+  - Campos: `pr_id` (PK, Azure DevOps ID), `pr_url`, `repo`, `source_branch`, `target_branch`, `title`, `status`, `task_id` (nullable FK a tasks), `created_at`, `updated_at`
+  - Poblar desde `POST /azure/prepare-and-pr` y `POST /azure/pull-requests`
+  - Endpoints: `GET /prs` (con filtros `?repo=`, `?status=`, `?task_id=`), `GET /prs/<pr_id>` (con refresh de estado desde Azure DevOps)
+
+- [ ] **Step tracking en tareas** — campo `steps` (JSON) en tabla `tasks` para exponer progreso granular al orquestador/UI:
+  ```json
+  {"steps": [
+    {"name": "fetch",         "status": "done"},
+    {"name": "create_branch", "status": "done"},
+    {"name": "push",          "status": "running"}
+  ]}
+  ```
+  Prerrequisito para cualquier UI que muestre progreso en tiempo real.
+
 ## Nice-to-have
 
 - [ ] `docker-compose.yml` para levantar `code-agent-mcp` + `claude-mcp-jira` juntos en local
 - [ ] `GET /tasks` — paginación (actualmente solo `limit`)
 - [ ] UI para editar el diccionario de ramas (`PUT /config/branches`)
-- [ ] Registro de PRs en SQLite (`src/pr_store.py`, tabla `prs` separada de `tasks`):
-  - Campos: `pr_id` (PK, Azure DevOps ID), `pr_url`, `repo`, `source_branch`, `target_branch`, `title`, `status`, `task_id` (nullable FK a tasks), `created_at`, `updated_at`
-  - Poblar desde `POST /azure/prepare-and-pr` y `POST /azure/pull-requests`
-  - Endpoints: `GET /prs` (con filtros `?repo=`, `?status=`, `?task_id=`), `GET /prs/<pr_id>` (con refresh de estado desde Azure DevOps)
+- [ ] PostgreSQL — migrar desde SQLite si se necesita concurrencia real (múltiples repos simultáneos)
+- [ ] Rate limiting en `POST /run` y `POST /azure/prepare-and-pr` (por token o por repo)
