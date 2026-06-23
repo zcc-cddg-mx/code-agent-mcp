@@ -53,7 +53,7 @@ Scripts de referencia en `apis/`:
 Ver `.env.example`. Las obligatorias para arrancar:
 
 ```
-AGENT_TOKEN=      # secreto compartido con claude-mcp-jira
+TOKEN_AZURE=      # secreto compartido con claude-mcp-jira
 AZURE_PAT=        # Personal Access Token de Azure DevOps
 AZURE_ORG=        # Organización Azure DevOps (ej. ZurichInsurance-EC)
 AZURE_PROJECT=    # Proyecto default para PR creation

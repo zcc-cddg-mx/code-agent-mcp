@@ -6,7 +6,7 @@
 #   ./projects.sh get    — get a project by slug (PROJECT_ID = org/name)
 
 BASE="${BASE_URL:-http://localhost:5001}"
-TOKEN="${AGENT_TOKEN:-dev-local}"
+TOKEN="${TOKEN_AZURE:-dev-local}"
 
 case "${1:-list}" in
 

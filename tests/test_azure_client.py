@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 @pytest.fixture
 def env_vars(monkeypatch):
-    monkeypatch.setenv("AGENT_TOKEN", "test-token")
+    monkeypatch.setenv("TOKEN_AZURE", "test-token")
     monkeypatch.setenv("AZURE_PAT", "fake-pat")
     monkeypatch.setenv("AZURE_ORG", "MyOrg")
     monkeypatch.setenv("AZURE_PROJECT", "MyProject")

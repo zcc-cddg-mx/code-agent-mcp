@@ -20,7 +20,7 @@ POST /run — JSON body:
     "callback_url":   "https://caller/webhook/done"         # optional
   }
 
-All endpoints require X-Agent-Token header (AGENT_TOKEN env var).
+All endpoints require X-Agent-Token header (TOKEN_AZURE env var).
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ Swagger(app, template={
         "description": (
             "Generic HTTP agent for git operations and Azure DevOps PR management.\n\n"
             "**Auth:** incluir header `X-Agent-Token` en cada request "
-            "(valor de la variable de entorno `AGENT_TOKEN` del servidor)."
+            "(valor de la variable de entorno `TOKEN_AZURE` del servidor)."
         ),
         "version": "1.0.0",
     },

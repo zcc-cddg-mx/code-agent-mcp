@@ -145,9 +145,9 @@ source .env.local
 bash tests/curl/azure.sh
 ```
 
-Para testear también los endpoints del agente, añadir `AGENT_TOKEN`:
+Para testear también los endpoints del agente, añadir `TOKEN_AZURE`:
 
 ```bash
 source .env.local
-AGENT_TOKEN=changeme PR_ID=123 bash tests/curl/azure.sh
+TOKEN_AZURE=changeme PR_ID=123 bash tests/curl/azure.sh
 ```

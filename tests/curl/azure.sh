@@ -10,7 +10,7 @@
 #
 # Variables opcionales:
 #   BASE_URL    — URL del code-agent-mcp  (default: http://localhost:5000)
-#   AGENT_TOKEN — token X-Agent-Token para los endpoints del agente
+#   TOKEN_AZURE — token X-Agent-Token para los endpoints del agente
 
 set -euo pipefail
 
@@ -61,13 +61,13 @@ curl -s \
 # Endpoints del code-agent-mcp
 # ─────────────────────────────────────────────────────────────────────────────
 
-if [[ -z "${AGENT_TOKEN:-}" ]]; then
+if [[ -z "${TOKEN_AZURE:-}" ]]; then
   echo ""
-  echo "AGENT_TOKEN no definido — saltando tests del agente"
+  echo "TOKEN_AZURE no definido — saltando tests del agente"
   exit 0
 fi
 
-TOKEN_HEADER="X-Agent-Token: ${AGENT_TOKEN}"
+TOKEN_HEADER="X-Agent-Token: ${TOKEN_AZURE}"
 
 sep "POST /azure/pull-requests — crear feature PR + aux PR"
 curl -s -w "\nHTTP %{http_code}" \

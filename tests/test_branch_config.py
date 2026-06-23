@@ -81,7 +81,7 @@ def test_corrupted_config_falls_back_to_defaults(tmp_path, monkeypatch):
 @pytest.fixture
 def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("TASKS_DB", str(tmp_path / "tasks.db"))
-    monkeypatch.setenv("AGENT_TOKEN", "test-token")
+    monkeypatch.setenv("TOKEN_AZURE", "test-token")
     monkeypatch.setattr(bc, "_CONFIG_PATH", tmp_path / "branch_config.json")
     bc._registry = None
 

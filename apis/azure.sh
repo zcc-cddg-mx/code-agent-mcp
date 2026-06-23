@@ -6,7 +6,7 @@
 #   ./azure.sh status    — get PR status + CI build status (PR_ID, REPO_NAME)
 
 BASE="${BASE_URL:-http://localhost:5001}"
-TOKEN="${AGENT_TOKEN:-dev-local}"
+TOKEN="${TOKEN_AZURE:-dev-local}"
 H=(-H "X-Agent-Token: $TOKEN" -H "Content-Type: application/json")
 
 case "${1:-status}" in

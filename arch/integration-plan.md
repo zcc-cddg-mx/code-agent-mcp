@@ -139,12 +139,12 @@ Output:
 ## Autenticación
 
 Todos los endpoints requieren `X-Agent-Token` header.
-Variable `AGENT_TOKEN` en `.env`. Sin token → 401.
+Variable `TOKEN_AZURE` en `.env`. Sin token → 401.
 
 Variables de entorno del `code-agent-mcp`:
 
 ```
-AGENT_TOKEN=<secreto compartido con claude-mcp-jira>
+TOKEN_AZURE=<secreto compartido con claude-mcp-jira>
 AZURE_PAT=<Personal Access Token de Azure DevOps>
 AZURE_ORG=<organización Azure DevOps>
 AZURE_PROJECT=<proyecto Azure DevOps>
@@ -168,7 +168,7 @@ Variables de entorno nuevas en `claude-mcp-jira`:
 
 ```
 CODE_AGENT_URL=http://code-agent-mcp:5000
-CODE_AGENT_TOKEN=<mismo valor que AGENT_TOKEN del code-agent-mcp>
+CODE_TOKEN_AZURE=<mismo valor que TOKEN_AZURE del code-agent-mcp>
 ```
 
 ---

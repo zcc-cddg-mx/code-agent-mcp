@@ -48,7 +48,7 @@ arch/                   — design and integration plan
 
 ### Authentication
 
-Every endpoint requires `X-Agent-Token` header (value = `AGENT_TOKEN` env var). Missing or wrong → 401. `/health` is the only unauthenticated endpoint.
+Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). Missing or wrong → 401. `/health` is the only unauthenticated endpoint.
 
 ## API surface
 
@@ -73,7 +73,7 @@ Every endpoint requires `X-Agent-Token` header (value = `AGENT_TOKEN` env var). 
 ## Environment variables
 
 ```
-AGENT_TOKEN=          # shared secret with claude-mcp-jira
+TOKEN_AZURE=          # shared secret with claude-mcp-jira
 AZURE_PAT=            # Azure DevOps Personal Access Token
 AZURE_ORG=            # Azure DevOps organization
 AZURE_PROJECT=        # Azure DevOps project (default for PR creation)

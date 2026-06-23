@@ -4,7 +4,7 @@
 # Required environment variables:
 #   GIT_USERNAME  — Azure Repos username
 #   GIT_PAT       — Azure Repos PAT (Code Read+Write)
-#   AGENT_TOKEN   — shared secret for X-Agent-Token authentication
+#   TOKEN_AZURE   — shared secret for X-Agent-Token authentication
 #
 # Optional:
 #   REPO_PATH     — path to clone/update the target repo (default: /repos/ov-arizona-backend-ecuador)
@@ -14,7 +14,7 @@ set -eu
 
 : "${GIT_USERNAME:?GIT_USERNAME is required}"
 : "${GIT_PAT:?GIT_PAT is required}"
-: "${AGENT_TOKEN:?AGENT_TOKEN is required}"
+: "${TOKEN_AZURE:?TOKEN_AZURE is required}"
 
 REPO_PATH="${REPO_PATH:-/repos/ov-arizona-backend-ecuador}"
 PORT="${PORT:-5000}"

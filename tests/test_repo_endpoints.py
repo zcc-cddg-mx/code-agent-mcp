@@ -62,7 +62,7 @@ _INSPECT_RESULT_2 = {
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("TASKS_DB", str(tmp_path / "tasks.db"))
-    monkeypatch.setenv("AGENT_TOKEN", "test-token")
+    monkeypatch.setenv("TOKEN_AZURE", "test-token")
     monkeypatch.setenv("AZURE_PAT", "fake-pat")
 
     import importlib
