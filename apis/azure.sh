@@ -2,14 +2,37 @@
 # Azure DevOps — PR creation and status
 #
 # Usage:
-#   ./azure.sh create    — create feature PR + aux PR
-#   ./azure.sh status    — get PR status + CI build status (PR_ID, REPO_NAME)
+#   ./azure.sh prepare-and-pr  — ensure aux branch exists/updated, create aux PR only
+#   ./azure.sh create          — create feature PR + aux PR (legacy)
+#   ./azure.sh status          — get PR status + CI build status (PR_ID, REPO_NAME)
 
 BASE="${BASE_URL:-http://localhost:5001}"
 TOKEN="${TOKEN_AZURE:-dev-local}"
 H=(-H "X-Agent-Token: $TOKEN" -H "Content-Type: application/json")
 
 case "${1:-status}" in
+
+  prepare-and-pr)
+    REPO="${REPO:?set REPO env var (Azure DevOps repo name)}"
+    REPO_PATH="${REPO_PATH:?set REPO_PATH env var (absolute local path to git clone)}"
+    BRANCH="${BRANCH:?set BRANCH env var (feature branch)}"
+    FILES="${FILES:?set FILES env var (JSON array of absolute file paths)}"
+    TARGET="${TARGET:-test}"
+    TICKET="${TICKET:?set TICKET env var}"
+    TITLE="${TITLE:?set TITLE env var}"
+    DESCRIPTION="${DESCRIPTION:-Generado automáticamente por code-agent-mcp}"
+    curl -s -X POST "$BASE/azure/prepare-and-pr" "${H[@]}" \
+      -d "{
+        \"repo\":        \"$REPO\",
+        \"repo_path\":   \"$REPO_PATH\",
+        \"branch\":      \"$BRANCH\",
+        \"files\":       $FILES,
+        \"target\":      \"$TARGET\",
+        \"ticket\":      \"$TICKET\",
+        \"title\":       \"$TITLE\",
+        \"description\": \"$DESCRIPTION\"
+      }" | python3 -m json.tool
+    ;;
 
   create)
     # Adjust repo, branch, aux_branch, title, target as needed
@@ -31,7 +54,7 @@ case "${1:-status}" in
     ;;
 
   *)
-    echo "Usage: $0 {create|status}"
+    echo "Usage: $0 {prepare-and-pr|create|status}"
     exit 1
     ;;
 esac

@@ -30,22 +30,24 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `GET` | `/repos/<name>` | Obtener repositorio por nombre |
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
 | `DELETE` | `/repos/<name>` | Eliminar del registro |
+| `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama (`base`/`integration`/`feature`/`other`) |
 | `GET` | `/projects` | Listar proyectos Azure DevOps (con sus repos) |
 | `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
 | `GET` | `/config/branches` | Ver diccionario de ramas |
 | `PUT` | `/config/branches` | Actualizar diccionario de ramas |
-| `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente |
+| `POST` | `/azure/prepare-and-pr` | Verificar/crear aux branch + crear PR auxiliar (idempotente) |
+| `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
 
 Scripts de referencia en `apis/`:
 
 ```bash
 ./apis/health.sh
-./apis/repos.sh   register|list|get|refresh|delete
+./apis/repos.sh    register|list|get|refresh|delete|set-role
 ./apis/projects.sh list|get
-./apis/tasks.sh   run|status|list|filter
-./apis/config.sh  get|update
-./apis/azure.sh   create|status
+./apis/tasks.sh    run|status|list|filter
+./apis/config.sh   get|update
+./apis/azure.sh    prepare-and-pr|create|status
 ```
 
 ## Variables de entorno
@@ -78,6 +80,37 @@ El diccionario de ramas define cuáles son de integración y cuál es la base pa
 | `develop` | producción-pre | **base para features** |
 | `main` | producción | producción desplegada |
 
+## Flujo de PR auxiliar (recomendado)
+
+`POST /azure/prepare-and-pr` es el endpoint principal para crear PRs. Es idempotente: se puede llamar varias veces con los mismos datos sin efectos secundarios.
+
+```
+POST /azure/prepare-and-pr
+{
+  "repo":       "ov-arizona-backend-ecuador",
+  "repo_path":  "/ruta/local/al/repo",
+  "branch":     "feature/ZNRX_67108_renov_agosto",
+  "files":      ["/ruta/local/al/repo/src/File.java"],
+  "target":     "test",
+  "ticket":     "ZNRX-67108",
+  "title":      "ZNRX-67108 Renovaciones agosto → test"
+}
+```
+
+Respuesta:
+```json
+{
+  "aux_branch": "feature/ZNRX_67108_renov_agosto_test_auxiliar",
+  "action":     "created",
+  "pr":         {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
+}
+```
+
+`action` indica qué ocurrió:
+- `created` — rama auxiliar no existía; se creó desde `origin/{target}`
+- `updated` — rama existía pero tenía archivos desactualizados; se aplicaron los cambios
+- `unchanged` — rama y PR ya existían; se devuelve el PR sin crear duplicado
+
 ## Registro de repositorios y proyectos
 
 Al registrar un repositorio, el servicio:
@@ -85,7 +118,17 @@ Al registrar un repositorio, el servicio:
 2. Consulta la API de Azure DevOps para obtener metadata (nombre, default branch, proyecto)
 3. Ejecuta `git ls-remote` para descubrir ramas sin clonar
 4. Clasifica ramas en integración / feature / other
-5. Persiste repo y proyecto en SQLite (tabla `repos` + tabla `projects`)
+5. Auto-asigna un **rol** a cada rama: `base`, `integration`, `feature`, u `other`
+6. Persiste repo y proyecto en SQLite (tabla `repos` + tabla `projects`)
+
+Los roles se almacenan por repo en `branch_roles` y se pueden corregir con `PATCH /repos/<name>/branches/<branch>`. La respuesta de `GET /repos/<name>` incluye además `branches_by_role` (inverso computado):
+
+```json
+"branches_by_role": {
+  "base":        ["develop"],
+  "integration": ["developer", "test", "main"]
+}
+```
 
 El proyecto se upserta automáticamente — dos repos del mismo proyecto comparten un único registro.
 

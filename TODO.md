@@ -1,6 +1,6 @@
 # TODO — code-agent-mcp
 
-Estado actual: servicio funcional con registro de repos/proyectos, Swagger UI, y scripts curl de referencia. Probado manualmente contra Azure DevOps (Ensurance-ZEC).
+Estado actual: servicio funcional con registro de repos/proyectos, roles de ramas, verificación idempotente de rama auxiliar, creación de PR (solo auxiliar), Swagger UI, y scripts curl de referencia. Probado end-to-end contra Azure DevOps (`ov-arizona-backend-ecuador`, PRs #2552–#2554).
 
 ---
 
@@ -40,10 +40,28 @@ Estado actual: servicio funcional con registro de repos/proyectos, Swagger UI, y
 - [x] `GET /projects` — lista proyectos con sus repos
 - [x] `GET /projects/<org>/<name>` — proyecto por slug
 
+### Roles de ramas por repo
+- [x] `branch_config.py` — campo `role` en defaults (`base` / `integration`); función `role(branch)`
+- [x] `repo_inspector.py` — `auto_assign_roles()`: detecta rol de cada rama al inspeccionar
+- [x] `repo_store.py` — columna `branch_roles` (JSON); `set_branch_role()` para actualización puntual
+- [x] `GET /repos/<name>` — incluye `branch_roles` y `branches_by_role` (inverso computado)
+- [x] `PATCH /repos/<name>/branches/<branch>` — corregir rol de una rama sin re-inspeccionar
+- [x] `apis/repos.sh set-role` — subcomando curl para corrección manual
+- [x] Probado: `master` de `ensurance-old-web` corregido a `integration` manualmente
+
+### Verificación y PR de rama auxiliar
+- [x] `src/placer.py` — `ensure_auxiliary_branch()`: verifica si la aux existe en origin, la crea si no, aplica archivos faltantes si está desactualizada; limpia ramas locales temporales
+- [x] `src/azure_client.py` — `_find_existing_pr()`: busca PR activo para `source→target` en Azure DevOps
+- [x] `POST /azure/prepare-and-pr` — endpoint completo: ensure aux + find-or-create PR → `{aux_branch, action, pr}`
+- [x] `action` ∈ `{"created", "updated", "unchanged"}` — idempotente, sin duplicar PRs
+- [x] `apis/azure.sh prepare-and-pr` — subcomando curl de referencia
+- [x] Probado: `feature/test_mcp_server` → `test` (PR #2554); segunda llamada devuelve mismo PR sin duplicar
+
 ### Documentación y tooling
 - [x] Swagger UI via flasgger (`/apidocs/`)
 - [x] `run_local.sh` — arranque local sin Docker
 - [x] `apis/` — scripts curl de referencia (health, repos, projects, tasks, config, azure)
+- [x] Renombrado `AGENT_TOKEN` → `TOKEN_AZURE` (usa el PAT del sistema)
 
 ---
 
@@ -66,3 +84,7 @@ Estado actual: servicio funcional con registro de repos/proyectos, Swagger UI, y
 - [ ] `docker-compose.yml` para levantar `code-agent-mcp` + `claude-mcp-jira` juntos en local
 - [ ] `GET /tasks` — paginación (actualmente solo `limit`)
 - [ ] UI para editar el diccionario de ramas (`PUT /config/branches`)
+- [ ] Registro de PRs en SQLite (`src/pr_store.py`, tabla `prs` separada de `tasks`):
+  - Campos: `pr_id` (PK, Azure DevOps ID), `pr_url`, `repo`, `source_branch`, `target_branch`, `title`, `status`, `task_id` (nullable FK a tasks), `created_at`, `updated_at`
+  - Poblar desde `POST /azure/prepare-and-pr` y `POST /azure/pull-requests`
+  - Endpoints: `GET /prs` (con filtros `?repo=`, `?status=`, `?task_id=`), `GET /prs/<pr_id>` (con refresh de estado desde Azure DevOps)

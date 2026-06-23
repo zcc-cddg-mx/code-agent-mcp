@@ -2,210 +2,135 @@
 
 ## Contexto
 
-`ov-suscripcion-automation` (code-agent) es un agente especializado que genera archivos de migración
-Flyway para el repositorio `ov-arizona-backend-ecuador`. Tiene lógica muy acoplada a ese dominio
-(generadores `.xlsx`/`.java`, rutas Flyway, convenciones de naming específicas).
+`code-agent-mcp` es un agente HTTP genérico que ejecuta operaciones git y crea PRs en Azure DevOps.
+Vive en `/home/idavid/dev/claude/code-agent-mcp`.
 
-**Decisión de diseño:** no se modifica el code-agent existente. Se crea un nuevo repo
-`code-agent-mcp` que toma solo la infraestructura genérica del code-agent y expone las
-capacidades necesarias para acoplarse con `claude-mcp-jira` como orquestador.
+Se creó desde cero (no modificando `ov-suscripcion-automation`) tomando solo la infraestructura
+genérica del code-agent original y descartando toda lógica específica del dominio Flyway/OV.
 
 ---
 
-## Qué se copia vs qué se descarta
+## Estado actual del `code-agent-mcp` (2026-06-23)
 
-### Se copia (infraestructura genérica)
+**73 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2554 reales creados.
 
-| Módulo | Por qué |
+### Módulos implementados
+
+| Módulo | Responsabilidad |
 |---|---|
-| `app.py` — HTTP API Flask (POST /run, GET /status, GET /tasks, GET /health) | Patrón probado: 202 inmediato + polling + SQLite + callback |
-| `src/task_store.py` — persistencia SQLite | Reutilizable sin cambios |
-| `src/logger.py` — log estructurado | Reutilizable sin cambios |
-| `src/placer.py` — git: branch, commit, push, auxiliar | Lógica git genérica; solo quitar las rutas hardcodeadas de Flyway |
-| `src/build_check.py` — verificación de compilación | Adaptable a otros lenguajes/builds |
-| Dockerfile + docker-entrypoint.sh | Base del container |
-| `environment.yml` / `requirements.txt` | Dependencias Python |
+| `app.py` | Flask HTTP API, todos los endpoints, Swagger UI (`/apidocs/`) |
+| `src/auth.py` | `X-Agent-Token` header → 401 si falta/incorrecto; `/health` es el único endpoint libre |
+| `src/task_store.py` | SQLite: tabla `tasks` (patrón async 202 + polling) |
+| `src/repo_store.py` | SQLite: tabla `repos` con columna `branch_roles` (JSON) |
+| `src/project_store.py` | SQLite: tabla `projects` (slug `{org}/{name}`); auto-upsert al registrar repo |
+| `src/repo_inspector.py` | Parsea URLs Azure DevOps, `git ls-remote`, clasifica ramas, auto-asigna roles |
+| `src/branch_config.py` | Registro dinámico de ramas con hot-reload; defaults del README de `ov-arizona-backend-ecuador` |
+| `src/placer.py` | Git genérico: `create_feature_branch`, `git_add_commit_push`, `create_auxiliary_branch`, `ensure_auxiliary_branch` (idempotente) |
+| `src/azure_client.py` | Azure DevOps REST API v7.1: crear PR, buscar PR existente, estado PR + build |
+| `src/logger.py` | Log estructurado |
 
-### Se descarta (lógica específica de ov-suscripcion)
-
-| Módulo | Por qué |
-|---|---|
-| `src/generator_ren_data.py` | Específico: migración vencimientos motor ams-policy |
-| `src/generator_rules.py` | Específico: reglas de tarificación ams-rule |
-| `src/java_template.py` | Específico: template Java Flyway |
-| `src/description.py` | Específico: naming convention VH_ren_data_{mes} |
-| `src/config.py` — `load_config()` con config.json | Reemplazar por `.env` estándar |
-| `fixtures/` — LOV estáticos ams-policy/ams-rule | Específicos del dominio |
-| `requirements/` — archivos Excel de negocio | Datos del dominio |
-| `gradle/`, `site/` — build tools Java | Específicos del stack |
-
----
-
-## Nuevo repo: `code-agent-mcp`
-
-### Responsabilidad
-
-Agente HTTP genérico que:
-1. Recibe órdenes de `claude-mcp-jira` (o cualquier caller con token)
-2. Ejecuta operaciones git sobre repositorios registrados (branch, commit, push)
-3. Crea PRs en Azure DevOps
-4. Reporta estado al caller (polling o callback)
-
-**No** genera archivos de dominio — eso lo hace el caller o un submódulo especializado.
-**No** conoce Jira — eso es responsabilidad exclusiva de `claude-mcp-jira`.
-
-### Estructura propuesta
-
-```
-code-agent-mcp/
-├── app.py                  — HTTP API (copiado + extendido)
-├── src/
-│   ├── task_store.py       — persistencia SQLite (copiado sin cambios)
-│   ├── logger.py           — log estructurado (copiado sin cambios)
-│   ├── placer.py           — git genérico: branch, commit, push, aux branch
-│   ├── azure_client.py     — Azure DevOps REST API (nuevo)
-│   └── auth.py             — validación X-Agent-Token (nuevo)
-├── Dockerfile
-├── .env.example
-├── environment.yml
-└── tests/
-```
-
----
-
-## Endpoints del `code-agent-mcp`
-
-### Existentes (adaptados del code-agent)
+### API surface completa
 
 | Método | Path | Descripción |
 |---|---|---|
-| `GET` | `/health` | Liveness check |
-| `POST` | `/run` | Ejecutar operación git: branch + archivos + commit + push; acepta `callback_url` en body |
+| `GET` | `/health` | Liveness (sin token) |
+| `POST` | `/run` | Encolar tarea git → 202 inmediato |
 | `GET` | `/status/<task_id>` | Estado de la tarea |
-| `GET` | `/tasks` | Últimas N tareas; acepta `?ticket=ZNRX-123` para filtrar |
+| `GET` | `/tasks` | Últimas N tareas; `?ticket=` filtra por ticket |
+| `GET` | `/config/branches` | Ver registro de ramas |
+| `PUT` | `/config/branches` | Actualizar registro (hot-reload) |
+| `POST` | `/repos` | Registrar repo + inspección inmediata |
+| `GET` | `/repos` | Listar repos |
+| `GET` | `/repos/<name>` | Repo por nombre (incluye `branch_roles` + `branches_by_role`) |
+| `POST` | `/repos/<name>/refresh` | Re-inspeccionar repo |
+| `DELETE` | `/repos/<name>` | Eliminar del registro |
+| `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama (sin re-inspeccionar) |
+| `GET` | `/projects` | Listar proyectos con sus repos |
+| `GET` | `/projects/<org>/<name>` | Proyecto por slug |
+| `POST` | `/azure/prepare-and-pr` | Idempotente: ensure aux branch + find-or-create PR aux ← **endpoint principal** |
+| `POST` | `/azure/pull-requests` | Crear feature PR + aux PR simultáneos (legacy) |
+| `GET` | `/azure/pull-requests/<pr_id>` | Estado del PR + build CI |
 
-**Cambio en `POST /run`:** en vez de `multipart/form-data` con archivo Excel, recibe JSON con
-paths de archivos ya generados por el caller, o solo instrucciones git (branch + commit message).
-El body `callback_url` opcional reemplaza el `N8N_CALLBACK_URL` hardcodeado.
+### Git flow implementado
 
-### Nuevos
+Basado en el README de `ov-arizona-backend-ecuador`:
+- Features se cortan desde `develop` (`is_base=True` en branch_config)
+- Rama auxiliar: `{feature_branch}_{target}_auxiliar`, base `origin/{target}`
+- `ensure_auxiliary_branch()` — idempotente: crea si no existe, actualiza si los archivos difieren, no hace nada si está al día
 
-| Método | Path | Descripción |
-|---|---|---|
-| `POST` | `/azure/pull-requests` | Crear PR en Azure DevOps (feature branch + aux branch) |
-| `GET` | `/azure/pull-requests/<pr_id>` | Estado del PR + estado del pipeline CI/CD |
+### Diccionario de ramas (defaults)
 
----
-
-## Contratos de los endpoints nuevos
-
-### `POST /azure/pull-requests`
-
-```json
-Input:
-{
-  "branch":      "feature/ZNRX_67108_renov_agosto",
-  "aux_branch":  "feature/ZNRX_67108_renov_agosto_developer_auxiliar",
-  "title":       "ZNRX-67108 — Migración vencimientos agosto 2026",
-  "description": "Datos de renovación motor, 1342 registros",
-  "repo":        "ov-arizona-backend-ecuador",
-  "target":      "developer"
-}
-
-Output:
-{
-  "feature_pr": {"pr_id": 123, "pr_url": "https://dev.azure.com/..."},
-  "aux_pr":     {"pr_id": 124, "pr_url": "https://dev.azure.com/..."}
-}
-```
-
-Credencial: `AZURE_PAT` + `AZURE_ORG` + `AZURE_PROJECT` en `.env`.
-API: `https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullrequests?api-version=7.1`
-
-### `GET /azure/pull-requests/<pr_id>`
-
-```json
-Output:
-{
-  "pr_id": 123,
-  "status":       "active" | "completed" | "abandoned",
-  "build_status": "pending" | "succeeded" | "failed" | "unknown",
-  "pr_url": "https://dev.azure.com/..."
-}
-```
+| Rama | Label | Rol | `is_base` |
+|---|---|---|---|
+| `develop` | producción-pre | `base` | ✅ feature branches se cortan desde aquí |
+| `developer` | desarrollo | `integration` | — DEV/UAT |
+| `test` | pruebas | `integration` | — Preprod |
+| `main` | producción-desplegado | `integration` | — Producción |
 
 ---
 
-## Autenticación
-
-Todos los endpoints requieren `X-Agent-Token` header.
-Variable `TOKEN_AZURE` en `.env`. Sin token → 401.
-
-Variables de entorno del `code-agent-mcp`:
+## Pipeline objetivo (claude-mcp-jira como orquestador)
 
 ```
-TOKEN_AZURE=<secreto compartido con claude-mcp-jira>
-AZURE_PAT=<Personal Access Token de Azure DevOps>
-AZURE_ORG=<organización Azure DevOps>
-AZURE_PROJECT=<proyecto Azure DevOps>
-TASKS_DB=/data/tasks.db
-UPLOADS_DIR=/data/uploads
-N8N_CALLBACK_URL=              # vacío — coexistencia opcional con n8n
+Claude Code (MCP tools)
+  → claude-mcp-jira
+    → Jira          (ya existe — create, update, transition, comment)
+    → code-agent-mcp (nuevo — run_code_agent, get_code_agent_status)
+    → Azure DevOps   (nuevo — create_azure_pull_request, get_pull_request_status)
+    → Jira           (link PR + transición "In Review")
+```
+
+Flujo completo desde Claude Code:
+
+```
+1. create_jira_issue           → ZNRX-XXXXX
+2. run_code_agent              → task_id  (202 inmediato)
+3. get_code_agent_status       → polling → "done" → {branch, aux_branch, commit_id}
+4. create_azure_pull_request   → {action, pr_id, pr_url}  (idempotente via prepare-and-pr)
+5. get_pull_request_status     → esperar build verde
+6. update_jira_issue           → link PR + transición "In Review"
 ```
 
 ---
 
-## MCP tools a añadir en `claude-mcp-jira` (Fase 11)
+## Pendiente en `claude-mcp-jira` (Fase 11)
 
-| Tool | Rol mínimo | Qué hace |
-|---|---|---|
-| `run_code_agent` | lead | Llama `POST /run`; texto libre → Claude extrae repo/branch/archivos/mensaje |
-| `get_code_agent_status` | dev | Llama `GET /status/<task_id>`; retorna estado + branch + commit_id |
-| `create_azure_pull_request` | lead | Llama `POST /azure/pull-requests`; crea PR feature + aux |
-| `get_pull_request_status` | dev | Llama `GET /azure/pull-requests/<pr_id>`; retorna estado PR + build |
+### Nuevo módulo: `service/clients/code_agent_client.py`
 
-Variables de entorno nuevas en `claude-mcp-jira`:
+Cliente HTTP hacia `code-agent-mcp`. Patrón idéntico a `jira_client.py`.
+
+Variables de entorno a añadir en `claude-mcp-jira`:
 
 ```
-CODE_AGENT_URL=http://code-agent-mcp:5000
-CODE_TOKEN_AZURE=<mismo valor que TOKEN_AZURE del code-agent-mcp>
+CODE_AGENT_URL=http://code-agent-mcp:5001   # URL del agente
+CODE_AGENT_TOKEN=                            # mismo valor que TOKEN_AZURE del agente
 ```
 
----
+### MCP tools a añadir en `jira_mcp/server.py`
 
-## Flujo completo objetivo
+| Tool | Rol mínimo | Endpoint que llama | Descripción |
+|---|---|---|---|
+| `run_code_agent` | lead | `POST /run` | Texto libre → Claude extrae repo/branch/archivos/ticket; retorna `task_id` |
+| `get_code_agent_status` | dev | `GET /status/<task_id>` | Estado + branch + commit_id |
+| `create_azure_pull_request` | lead | `POST /azure/prepare-and-pr` | Idempotente: ensure aux + find-or-create PR |
+| `get_pull_request_status` | dev | `GET /azure/pull-requests/<pr_id>` | Estado PR + build CI |
 
-```
-1. create_jira_issue          → ZNRX-XXXXX
-2. run_code_agent             → task_id  (202 inmediato)
-3. get_code_agent_status      → polling → "done" → {branch, aux_branch, commit_id}
-4. create_azure_pull_request  → {feature_pr, aux_pr}
-5. get_pull_request_status    → esperar build verde
-6. update_jira_issue          → link PR + transición "In Review"
-```
+### Orden de implementación
 
----
-
-## Orden de implementación
-
-| Paso | Dónde | Qué |
-|---|---|---|
-| 1 | `code-agent-mcp` (nuevo repo) | Crear repo; copiar infraestructura base del code-agent |
-| 2 | `code-agent-mcp` | Adaptar `placer.py` para git genérico (sin rutas Flyway hardcodeadas) |
-| 3 | `code-agent-mcp` | `src/auth.py` + `X-Agent-Token` en todos los endpoints |
-| 4 | `code-agent-mcp` | `src/azure_client.py` + `POST /azure/pull-requests` |
-| 5 | `code-agent-mcp` | `GET /azure/pull-requests/<pr_id>` |
-| 6 | `code-agent-mcp` | `GET /tasks?ticket=` |
-| 7 | `code-agent-mcp` | `callback_url` en `POST /run` (reemplaza `N8N_CALLBACK_URL` hardcodeado) |
-| 8 | `claude-mcp-jira` | `service/clients/code_agent_client.py` + MCP tools (Fase 11) |
-| 9 | `claude-mcp-jira` | e2e test del flujo completo |
+| Paso | Qué |
+|---|---|
+| 1 | `service/clients/code_agent_client.py` — funciones: `run_task`, `get_task_status`, `prepare_and_pr`, `get_pr_status` |
+| 2 | `jira_mcp/server.py` — añadir 4 tools al schema + dispatch |
+| 3 | `jira_mcp/service_client.py` — añadir 4 funciones que llaman al client |
+| 4 | `scripts/test-code-agent.sh` — e2e del flujo completo |
+| 5 | Actualizar CLAUDE.md, TODO, docs |
 
 ---
 
 ## Coexistencia con n8n y el code-agent original
 
-- `ov-suscripcion-automation` sigue funcionando sin cambios para su dominio específico (migraciones Flyway OV)
-- `code-agent-mcp` es un agente nuevo, independiente, sin dependencia del anterior
-- n8n puede seguir usando `ov-suscripcion-automation` para los flujos automáticos (webhook Jira)
+- `ov-suscripcion-automation` sigue sin cambios para su dominio (migraciones Flyway OV)
+- `code-agent-mcp` es independiente — sin dependencia del anterior
+- n8n puede seguir usando `ov-suscripcion-automation` para flujos automáticos (webhook Jira)
 - `claude-mcp-jira` usa `code-agent-mcp` para flujos supervisados desde Claude Code
-- La decisión de retirar n8n es independiente y no es prerequisito técnico
+- Retirar n8n es una decisión de equipo, no un prerequisito técnico

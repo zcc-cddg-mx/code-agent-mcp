@@ -161,3 +161,62 @@ def test_get_pull_request_missing_repo_param(client):
     with patch.dict(os.environ, {"AZURE_REPO": ""}):
         resp = client.get("/azure/pull-requests/123", headers=_HEADERS)
     assert resp.status_code == 400
+
+
+# ─── POST /azure/prepare-and-pr ──────────────────────────────────────────────
+
+_PREPARE_BODY = {
+    "repo":      "my-repo",
+    "repo_path": "/tmp/fake-repo",
+    "branch":    "feature/test_mcp_server",
+    "files":     ["/tmp/fake-repo/README.md"],
+    "target":    "test",
+    "ticket":    "test_mcp",
+    "title":     "test_mcp → test",
+}
+
+
+def test_prepare_and_pr_creates_branch_and_pr(client, tmp_path):
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2560)):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["aux_branch"] == "feature/test_mcp_server_test_auxiliar"
+    assert data["action"] == "created"
+    assert data["pr"]["pr_id"] == 2560
+
+
+def test_prepare_and_pr_returns_existing_pr(client):
+    existing = {"pr_id": 2555, "pr_url": "https://dev.azure.com/.../pullrequest/2555"}
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "unchanged")), \
+         patch("src.azure_client._find_existing_pr", return_value=existing):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["action"] == "unchanged"
+    assert data["pr"]["pr_id"] == 2555
+
+
+def test_prepare_and_pr_updates_branch_and_creates_pr(client):
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "updated")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2561)):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["action"] == "updated"
+    assert data["pr"]["pr_id"] == 2561
+
+
+def test_prepare_and_pr_missing_fields(client):
+    resp = client.post("/azure/prepare-and-pr", json={"repo": "x"}, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "Missing" in resp.get_json()["error"]
+
+
+def test_prepare_and_pr_git_error(client):
+    with patch("src.placer.ensure_auxiliary_branch", side_effect=RuntimeError("git failed")):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 502

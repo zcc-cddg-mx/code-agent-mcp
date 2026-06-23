@@ -103,6 +103,107 @@ def git_add_commit_push(
     return commit_id
 
 
+def _get_current_head(repo_dir: str) -> str:
+    """Return the current branch name (or commit hash if detached HEAD)."""
+    result = subprocess.run(
+        ["git", "-C", repo_dir, "rev-parse", "--abbrev-ref", "HEAD"],
+        check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
+def _file_content_on_branch(repo_dir: str, branch: str, rel_path: str) -> bytes | None:
+    """Return file content from a branch via git show, or None if the file doesn't exist there."""
+    result = subprocess.run(
+        ["git", "-C", repo_dir, "show", f"{branch}:{rel_path}"],
+        capture_output=True,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def ensure_auxiliary_branch(
+    repo_root: Path,
+    feature_branch: str,
+    target: str,
+    files: list[Path],
+    ticket_id: str,
+    commit_message: str,
+) -> tuple[str, str]:
+    """Ensure the auxiliary branch exists on origin and contains all *files* from *feature_branch*.
+
+    Returns (aux_branch_name, action) where action is one of:
+      "created"   — branch did not exist; created from origin/{target}
+      "updated"   — branch existed but was missing some files; files were applied
+      "unchanged" — branch existed and already had all files up to date
+    """
+    aux = aux_branch_name(feature_branch, target)
+    r = str(Path(repo_root).resolve())
+    abs_root = Path(repo_root).resolve()
+
+    log("GIT", f"fetch origin/{target} and origin/{feature_branch}")
+    subprocess.run(["git", "-C", r, "fetch", "origin", target], check=True)
+    subprocess.run(["git", "-C", r, "fetch", "origin", feature_branch], check=True)
+
+    ls = subprocess.run(
+        ["git", "-C", r, "ls-remote", "--heads", "origin", aux],
+        capture_output=True, text=True,
+    )
+    aux_exists = bool(ls.returncode == 0 and ls.stdout.strip())
+
+    def _apply_files(source_ref: str, dest_files: list[Path]) -> None:
+        for f in dest_files:
+            rel = str(Path(f).resolve().relative_to(abs_root))
+            content = _file_content_on_branch(r, f"origin/{feature_branch}", rel)
+            if content is None:
+                raise RuntimeError(f"File '{rel}' not found on branch '{feature_branch}'")
+            dest = abs_root / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+
+    original_head = _get_current_head(r)
+
+    if not aux_exists:
+        log("GIT", f"aux branch '{aux}' does not exist — creating from origin/{target}")
+        subprocess.run(["git", "-C", r, "checkout", "-b", aux, f"origin/{target}"], check=True)
+        _apply_files(feature_branch, files)
+        rel_files = [str(Path(f).resolve().relative_to(abs_root)) for f in files]
+        subprocess.run(["git", "-C", r, "add"] + rel_files, check=True)
+        subprocess.run(["git", "-C", r, "commit", "-m", f"[{ticket_id}] {commit_message}"], check=True)
+        _push_branch(r, aux)
+        subprocess.run(["git", "-C", r, "checkout", original_head], check=True)
+        subprocess.run(["git", "-C", r, "branch", "-D", aux], check=True)
+        return aux, "created"
+
+    # Branch exists — fetch it and check which files differ
+    subprocess.run(["git", "-C", r, "fetch", "origin", aux], check=True)
+
+    outdated: list[Path] = []
+    for f in files:
+        rel = str(Path(f).resolve().relative_to(abs_root))
+        feature_content = _file_content_on_branch(r, f"origin/{feature_branch}", rel)
+        aux_content = _file_content_on_branch(r, f"origin/{aux}", rel)
+        if feature_content != aux_content:
+            outdated.append(f)
+
+    if not outdated:
+        log("GIT", f"aux branch '{aux}' already up to date — nothing to do")
+        return aux, "unchanged"
+
+    log("GIT", f"aux branch '{aux}' exists but {len(outdated)} file(s) differ — updating")
+    local_tmp = f"{aux}_update_tmp"
+    subprocess.run(["git", "-C", r, "checkout", "-b", local_tmp, f"origin/{aux}"], check=True)
+    _apply_files(feature_branch, outdated)
+    rel_outdated = [str(Path(f).resolve().relative_to(abs_root)) for f in outdated]
+    subprocess.run(["git", "-C", r, "add"] + rel_outdated, check=True)
+    subprocess.run(["git", "-C", r, "commit", "-m", f"[{ticket_id}] {commit_message} (update)"], check=True)
+    # Rename local branch to the canonical aux name so _push_branch pushes to the right remote ref
+    subprocess.run(["git", "-C", r, "branch", "-m", local_tmp, aux], check=True)
+    _push_branch(r, aux)
+    subprocess.run(["git", "-C", r, "checkout", original_head], check=True)
+    subprocess.run(["git", "-C", r, "branch", "-D", aux], check=True)
+    return aux, "updated"
+
+
 def create_auxiliary_branch(
     repo_root: Path,
     feature_branch: str,

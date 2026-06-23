@@ -63,11 +63,13 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `GET` | `/repos/<name>` | Get repo by name |
 | `POST` | `/repos/<name>/refresh` | Re-inspect repo |
 | `DELETE` | `/repos/<name>` | Remove from registry |
+| `PATCH` | `/repos/<name>/branches/<path:branch>` | Override branch role: `base`/`integration`/`feature`/`other` |
 | `GET` | `/projects` | List projects (with repos list) |
 | `GET` | `/projects/<org>/<name>` | Get project by slug |
 | `GET` | `/config/branches` | Get branch registry |
 | `PUT` | `/config/branches` | Update branch registry (hot-reload) |
-| `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously |
+| `POST` | `/azure/prepare-and-pr` | Ensure aux branch + create aux PR only (idempotent) |
+| `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | PR status + CI build status |
 
 ## Environment variables
@@ -93,18 +95,33 @@ Feature branches are cut from `develop` (not `developer`). Auxiliary branches ar
 - `aux_branch_name(branch, target)` → `{branch}_{target}_auxiliar`
 - `create_feature_branch(repo_root, branch, base_branch=None)` — default base from `branch_config.base_branch()` (the entry with `is_base=True`, defaults to `develop`)
 - `create_auxiliary_branch(repo_root, feature_branch, target, files, ticket, commit_message)` — checks out from `origin/{target}`, cherry-picks files from the feature branch
+- `ensure_auxiliary_branch(repo_root, feature_branch, target, files, ticket, commit_message)` → `(aux_branch, action)` — idempotent: creates if absent, updates if files differ, skips if up to date; always cleans up local temporary branches
 
-## Branch registry defaults
+## Branch registry defaults and roles
 
-| Branch | Label | Notes |
-|---|---|---|
-| `developer` | desarrollo | DEV-UAT integration |
-| `test` | pruebas | Preprod integration |
-| `develop` | producción-pre | **base for features** (`is_base=True`) |
-| `main` | producción-desplegado | production |
+| Branch | Label | Role | Notes |
+|---|---|---|---|
+| `developer` | desarrollo | `integration` | DEV-UAT |
+| `test` | pruebas | `integration` | Preprod |
+| `develop` | producción-pre | `base` | **cut features from here** (`is_base=True`) |
+| `main` | producción-desplegado | `integration` | production |
+
+### Per-repo branch roles
+
+`inspect()` calls `auto_assign_roles(branches)` to populate `branch_roles` (JSON column in `repos` table):
+1. Branch name in global `branch_config` → use its `role` field
+2. Starts with `feature/` or `fix/` → `"feature"`
+3. In `_KNOWN_INTEGRATION_BRANCHES` set → `"integration"`
+4. Otherwise → `"other"`
+
+`GET /repos/<name>` returns `branch_roles` (persisted) plus `branches_by_role` (computed inverse, not persisted).
+`PATCH /repos/<name>/branches/<branch>` lets callers override a single branch role without re-inspecting.
+
+**DB migration for existing installs:** `sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"`
 
 ## Key constraints
 
+- **This agent never touches code.** It receives already-generated file paths from the caller and moves them between branches. It never generates, modifies, or interprets file contents.
 - Do **not** modify `ov-suscripcion-automation` — it continues serving its own domain unchanged.
 - `POST /run` accepts JSON (not `multipart/form-data`). The caller provides already-generated file paths.
 - This service never talks to Jira — that is exclusively `claude-mcp-jira`'s responsibility.

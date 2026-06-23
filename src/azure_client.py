@@ -123,6 +123,139 @@ def _get_build_status(repo: str, pr_id: int) -> str:
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _find_existing_pr(repo: str, source_branch: str, target_branch: str) -> dict | None:
+    """Return {pr_id, pr_url} of the first active PR for source→target, or None."""
+    if not _PAT or not _ORG or not _PROJECT:
+        return None
+    url = (
+        f"https://dev.azure.com/{_ORG}/{_PROJECT}/_apis/git/repositories"
+        f"/{repo}/pullrequests"
+    )
+    params = {
+        "searchCriteria.sourceRefName": f"refs/heads/{source_branch}",
+        "searchCriteria.targetRefName": f"refs/heads/{target_branch}",
+        "searchCriteria.status": "active",
+        "api-version": _API_VERSION,
+    }
+    resp = requests.get(url, params=params, headers=_auth_header(), verify=_VERIFY_SSL, timeout=15)
+    if not resp.ok:
+        return None
+    items = resp.json().get("value", [])
+    if not items:
+        return None
+    pr = items[0]
+    pr_id = pr["pullRequestId"]
+    return {"pr_id": pr_id, "pr_url": _pr_url(_ORG, _PROJECT, repo, pr_id)}
+
+
+@azure_bp.post("/azure/prepare-and-pr")
+@require_token
+def prepare_and_pr():
+    """Ensure aux branch exists/is up-to-date, then create (or return existing) aux PR.
+    ---
+    tags: [Azure DevOps]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [repo, repo_path, branch, files, target, ticket, title]
+          properties:
+            repo:
+              type: string
+              description: Azure DevOps repository name
+              example: ov-arizona-backend-ecuador
+            repo_path:
+              type: string
+              description: Absolute local path to the git clone
+              example: /home/idavid/dev/ov/ov-arizona-backend-ecuador
+            branch:
+              type: string
+              description: Feature branch (source of files)
+              example: feature/test_mcp_server
+            files:
+              type: array
+              items: {type: string}
+              description: Absolute paths of files to integrate
+              example: [/home/idavid/dev/ov/ov-arizona-backend-ecuador/README.md]
+            target:
+              type: string
+              description: Integration branch (aux PR target)
+              example: test
+            ticket:
+              type: string
+              example: ZNRX-12345
+            title:
+              type: string
+              example: "ZNRX-12345 Renovaciones junio → test"
+            description:
+              type: string
+              example: "Generado automáticamente por code-agent-mcp"
+    responses:
+      200:
+        description: PR already existed (action=unchanged)
+      201:
+        description: Aux branch created/updated and PR created
+        schema:
+          type: object
+          properties:
+            aux_branch: {type: string}
+            action:     {type: string, enum: [created, updated, unchanged]}
+            pr:
+              type: object
+              properties:
+                pr_id:  {type: integer}
+                pr_url: {type: string}
+      400:
+        description: Missing required fields
+      502:
+        description: Git or Azure DevOps error
+    """
+    from pathlib import Path as _Path
+    from src.placer import ensure_auxiliary_branch
+
+    body = request.get_json(silent=True) or {}
+    required = ("repo", "repo_path", "branch", "files", "target", "ticket", "title")
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
+
+    files = body["files"]
+    if not isinstance(files, list) or not files:
+        return jsonify({"error": "'files' must be a non-empty list"}), 400
+
+    repo: str = body["repo"]
+    repo_path = _Path(body["repo_path"])
+    branch: str = body["branch"]
+    target: str = body["target"]
+    ticket: str = body["ticket"]
+    title: str = body["title"]
+    description: str = body.get("description", "")
+    file_paths = [_Path(f) for f in files]
+
+    try:
+        aux_branch, action = ensure_auxiliary_branch(
+            repo_path, branch, target, file_paths, ticket, title
+        )
+    except Exception as exc:
+        log("AZURE", f"ensure_auxiliary_branch error: {exc}")
+        return jsonify({"error": str(exc)}), 502
+
+    existing_pr = _find_existing_pr(repo, aux_branch, target)
+    if existing_pr:
+        log("AZURE", f"PR already exists for {aux_branch} → {target}: {existing_pr['pr_id']}")
+        return jsonify({"aux_branch": aux_branch, "action": action, "pr": existing_pr}), 200
+
+    try:
+        pr = _create_pr(repo, aux_branch, target, title, description)
+    except RuntimeError as exc:
+        log("AZURE", f"PR creation error: {exc}")
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify({"aux_branch": aux_branch, "action": action, "pr": pr}), 201
+
+
 @azure_bp.post("/azure/pull-requests")
 @require_token
 def create_pull_requests():
