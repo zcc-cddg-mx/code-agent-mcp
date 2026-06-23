@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+
+# Credentials and local config — NEVER in image
+.env.local
+.env*
+config.json
+
+# Claude / IDE / editor
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Gradle artifacts — not needed in Alpine image
+gradle/
+docker/
+
+# Docs and architecture
+architecture/
+README.md
+CLAUDE.md
+TODO.md
+*.md
+
+# Scripts operativos — solo se usan en el host
+1-build-agent.sh
+2-start-agent.sh
+3-test-agent.sh
+Dockerfile
+Dockerfile.*
+
+# Tests — no se ejecutan en el contenedor
+tests/
+
+# Business input files — llegan por multipart en el request
+requirements/
+fixtures/rules/business-reference/
+
+# Local artifacts
+data/
+logs/
+site/
+tests/migrations/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+
+# Conda / pip env
+environment.yml
+.conda/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
