@@ -126,6 +126,61 @@ def _get_build_status(repo: str, pr_id: int) -> str:
 @azure_bp.post("/azure/pull-requests")
 @require_token
 def create_pull_requests():
+    """Create feature PR and auxiliary PR simultaneously in Azure DevOps.
+    ---
+    tags: [Azure DevOps]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [branch, aux_branch, title, repo]
+          properties:
+            repo:
+              type: string
+              description: Azure DevOps repository name
+              example: ov-arizona-backend-ecuador
+            branch:
+              type: string
+              description: Feature branch (source of feature PR)
+              example: feature/ZNRX_67108_renov_agosto
+            aux_branch:
+              type: string
+              description: Auxiliary branch (source of aux PR)
+              example: feature/ZNRX_67108_renov_agosto_developer_auxiliar
+            title:
+              type: string
+              example: "ZNRX-67108 Migración vencimientos agosto 2026"
+            description:
+              type: string
+              example: "Generado automáticamente por code-agent-mcp"
+            target:
+              type: string
+              description: Target integration branch
+              default: developer
+              example: developer
+    responses:
+      201:
+        description: Both PRs created
+        schema:
+          type: object
+          properties:
+            feature_pr:
+              type: object
+              properties:
+                pr_id:  {type: integer}
+                pr_url: {type: string}
+            aux_pr:
+              type: object
+              properties:
+                pr_id:  {type: integer}
+                pr_url: {type: string}
+      400:
+        description: Missing required fields
+      502:
+        description: Azure DevOps API error
+    """
     body = request.get_json(silent=True) or {}
 
     missing = [f for f in ("branch", "aux_branch", "title", "repo") if not body.get(f)]
@@ -156,6 +211,38 @@ def create_pull_requests():
 @azure_bp.get("/azure/pull-requests/<int:pr_id>")
 @require_token
 def get_pull_request(pr_id: int):
+    """Get PR status and CI build status.
+    ---
+    tags: [Azure DevOps]
+    parameters:
+      - in: path
+        name: pr_id
+        type: integer
+        required: true
+        example: 2505
+      - in: query
+        name: repo
+        type: string
+        required: true
+        description: Azure DevOps repository name (or set AZURE_REPO env var)
+        example: ov-arizona-backend-ecuador
+    responses:
+      200:
+        description: PR status
+        schema:
+          type: object
+          properties:
+            pr_id:        {type: integer, example: 2505}
+            status:       {type: string, enum: [active, completed, abandoned], example: active}
+            build_status: {type: string, enum: [pending, succeeded, failed, unknown], example: succeeded}
+            pr_url:       {type: string}
+      400:
+        description: repo param missing
+      404:
+        description: PR not found
+      502:
+        description: Azure DevOps API error
+    """
     repo = request.args.get("repo", os.environ.get("AZURE_REPO", ""))
     if not repo:
         return jsonify({"error": "repo query param required (or set AZURE_REPO env var)"}), 400

@@ -36,6 +36,7 @@ from pathlib import Path
 
 import requests as http_requests
 from flask import Flask, jsonify, request
+from flasgger import Swagger
 
 from src.auth import require_token
 from src.logger import log
@@ -48,6 +49,24 @@ app = Flask(__name__)
 task_store.init_db()
 repo_store.init_db()
 project_store.init_db()
+
+Swagger(app, template={
+    "swagger": "2.0",
+    "info": {
+        "title": "Code Agent MCP",
+        "description": "Generic HTTP agent for git operations and Azure DevOps PR management.",
+        "version": "1.0.0",
+    },
+    "basePath": "/",
+    "securityDefinitions": {
+        "AgentToken": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Agent-Token",
+        }
+    },
+    "security": [{"AgentToken": []}],
+})
 
 _RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 task_store.cleanup_old_records(days=_RETENTION_DAYS)
@@ -114,12 +133,76 @@ def _notify_callback(callback_url: str, task: dict) -> None:
 
 @app.get("/health")
 def health():
+    """Liveness check.
+    ---
+    tags: [System]
+    security: []
+    responses:
+      200:
+        description: Service is up
+        schema:
+          type: object
+          properties:
+            status: {type: string, example: ok}
+            service: {type: string, example: code-agent-mcp}
+    """
     return jsonify({"status": "ok", "service": "code-agent-mcp"})
 
 
 @app.post("/run")
 @require_token
 def run():
+    """Enqueue a git task (branch + commit + push + aux branch).
+    ---
+    tags: [Tasks]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [repo, branch, files, ticket, commit_message]
+          properties:
+            repo:
+              type: string
+              description: Absolute path to the local repo clone
+              example: /repos/ov-arizona-backend-ecuador
+            branch:
+              type: string
+              example: feature/ZNRX_67108_renov_agosto
+            base_branch:
+              type: string
+              description: Branch to cut from (default from branch config)
+              example: develop
+            target:
+              type: string
+              description: Integration branch to create aux branch against
+              example: developer
+            files:
+              type: array
+              items: {type: string}
+              example: [/repos/ov-arizona-backend-ecuador/src/File.java]
+            ticket:
+              type: string
+              example: ZNRX-67108
+            commit_message:
+              type: string
+              example: "Migración vencimientos agosto 2026"
+            callback_url:
+              type: string
+              description: Webhook called when the task completes
+              example: https://caller/webhook/done
+    responses:
+      202:
+        description: Task accepted (or rejected if another is running)
+        schema:
+          type: object
+          properties:
+            status: {type: string, example: queued}
+            task_id: {type: string, example: a1b2c3d4}
+      400:
+        description: Missing required fields
+    """
     body = request.get_json(silent=True) or {}
 
     missing = [f for f in ("repo", "branch", "files", "ticket", "commit_message") if not body.get(f)]
@@ -213,6 +296,31 @@ def run():
 @app.get("/status/<task_id>")
 @require_token
 def status(task_id: str):
+    """Poll task status.
+    ---
+    tags: [Tasks]
+    parameters:
+      - in: path
+        name: task_id
+        type: string
+        required: true
+        example: a1b2c3d4
+    responses:
+      200:
+        description: Task record
+        schema:
+          type: object
+          properties:
+            task_id: {type: string}
+            status: {type: string, enum: [queued, running, done, error, rejected]}
+            ticket: {type: string}
+            branch: {type: string}
+            aux_branch: {type: string}
+            commit_id: {type: string}
+            error: {type: string}
+      404:
+        description: Task not found
+    """
     task = task_store.get(task_id)
     if not task:
         return jsonify({"error": "task not found"}), 404
@@ -222,6 +330,27 @@ def status(task_id: str):
 @app.get("/tasks")
 @require_token
 def tasks():
+    """List recent tasks.
+    ---
+    tags: [Tasks]
+    parameters:
+      - in: query
+        name: limit
+        type: integer
+        default: 50
+        description: Max number of results (cap 200)
+      - in: query
+        name: ticket
+        type: string
+        description: Filter by ticket ID
+        example: ZNRX-67108
+    responses:
+      200:
+        description: List of task records (newest first)
+        schema:
+          type: array
+          items: {type: object}
+    """
     limit = min(int(request.args.get("limit", 50)), 200)
     ticket = request.args.get("ticket") or None
     return jsonify(task_store.get_recent(limit, ticket=ticket))
@@ -234,18 +363,45 @@ def tasks():
 @app.get("/config/branches")
 @require_token
 def get_branch_config():
-    """Return the active branch registry."""
+    """Get the active branch registry.
+    ---
+    tags: [Configuration]
+    responses:
+      200:
+        description: Branch registry keyed by branch name
+        schema:
+          type: object
+          example:
+            developer: {label: desarrollo, environment: DEV-UAT}
+            develop:   {label: "producción-pre", is_base: true}
+    """
     return jsonify(branch_config.get_registry())
 
 
 @app.put("/config/branches")
 @require_token
 def put_branch_config():
-    """Replace the branch registry and persist to disk.
-
-    Body: JSON object with branch names as keys. Unknown fields are merged with
-    defaults so existing entries not in the body are preserved.
-    Each entry supports: label, environment, url, is_base (all optional).
+    """Update the branch registry (merged with defaults, persisted to disk).
+    ---
+    tags: [Configuration]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          description: >
+            Keys are branch names. Each entry may include: label, environment,
+            url, is_base. Unknown keys are merged with defaults.
+          example:
+            developer: {label: desarrollo, environment: DEV-UAT}
+            test:      {label: pruebas, environment: Preprod}
+    responses:
+      200:
+        description: Full updated registry
+        schema: {type: object}
+      400:
+        description: Body is not a JSON object
     """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -262,12 +418,34 @@ def put_branch_config():
 @app.post("/repos")
 @require_token
 def register_repo():
-    """Register a new repository and inspect it immediately.
-
-    Body:
-      { "git_url": "https://ZurichInsurance-EC@dev.azure.com/.../ov-arizona-restat" }
-
-    Reads AZURE_PAT from env for inspection. Returns the registered repo record.
+    """Register a new repository and inspect it via Azure DevOps API + git ls-remote.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [git_url]
+          properties:
+            git_url:
+              type: string
+              example: "https://ZurichInsurance-EC@dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat"
+    responses:
+      201:
+        description: Repository and project registered
+        schema:
+          type: object
+          properties:
+            repo:    {type: object}
+            project: {type: object}
+      400:
+        description: Missing or invalid git_url
+      409:
+        description: Repository already registered
+      502:
+        description: Azure API or git ls-remote call failed
     """
     from src.repo_inspector import inspect, parse_azure_url
     import uuid as _uuid
@@ -318,14 +496,38 @@ def register_repo():
 @app.get("/repos")
 @require_token
 def list_repos():
-    """List all registered repositories."""
+    """List all registered repositories.
+    ---
+    tags: [Repositories]
+    responses:
+      200:
+        description: Array of repository records
+        schema:
+          type: array
+          items: {type: object}
+    """
     return jsonify(repo_store.list_all())
 
 
 @app.get("/repos/<repo_name>")
 @require_token
 def get_repo(repo_name: str):
-    """Get a registered repository by name."""
+    """Get a registered repository by name.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ov-arizona-restat
+    responses:
+      200:
+        description: Repository record
+        schema: {type: object}
+      404:
+        description: Not found
+    """
     repo = repo_store.get_by_name(repo_name)
     if not repo:
         return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
@@ -335,7 +537,28 @@ def get_repo(repo_name: str):
 @app.post("/repos/<repo_name>/refresh")
 @require_token
 def refresh_repo(repo_name: str):
-    """Re-inspect a registered repository and update its record."""
+    """Re-inspect a registered repository and update its record.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ov-arizona-restat
+    responses:
+      200:
+        description: Updated repo and project records
+        schema:
+          type: object
+          properties:
+            repo:    {type: object}
+            project: {type: object}
+      404:
+        description: Repository not registered
+      502:
+        description: Inspection failed
+    """
     from src.repo_inspector import inspect
 
     repo = repo_store.get_by_name(repo_name)
@@ -366,7 +589,25 @@ def refresh_repo(repo_name: str):
 @app.delete("/repos/<repo_name>")
 @require_token
 def delete_repo(repo_name: str):
-    """Remove a repository from the registry."""
+    """Remove a repository from the registry.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ov-arizona-restat
+    responses:
+      200:
+        description: Deleted
+        schema:
+          type: object
+          properties:
+            deleted: {type: string, example: ov-arizona-restat}
+      404:
+        description: Not found
+    """
     repo = repo_store.get_by_name(repo_name)
     if not repo:
         return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
@@ -382,7 +623,24 @@ def delete_repo(repo_name: str):
 @app.get("/projects")
 @require_token
 def list_projects():
-    """List all registered projects."""
+    """List all registered projects (each with its repos).
+    ---
+    tags: [Projects]
+    responses:
+      200:
+        description: Array of project records
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              project_id: {type: string, example: "ZurichInsurance-EC/Oficina-Virtual-ZEC"}
+              org:        {type: string, example: ZurichInsurance-EC}
+              name:       {type: string, example: Oficina-Virtual-ZEC}
+              repos:
+                type: array
+                items: {type: string}
+    """
     projects = project_store.list_all()
     # Enrich each project with its repo list
     all_repos = repo_store.list_all()
@@ -399,9 +657,22 @@ def list_projects():
 @app.get("/projects/<path:project_id>")
 @require_token
 def get_project(project_id: str):
-    """Get a project by its ID ({org}/{name}).
-
-    Example: GET /projects/ZurichInsurance-EC/Oficina-Virtual-ZEC
+    """Get a project by its slug ({org}/{name}).
+    ---
+    tags: [Projects]
+    parameters:
+      - in: path
+        name: project_id
+        type: string
+        required: true
+        description: "{org}/{project_name}"
+        example: ZurichInsurance-EC/Oficina-Virtual-ZEC
+    responses:
+      200:
+        description: Project record with repos list
+        schema: {type: object}
+      404:
+        description: Not found
     """
     project = project_store.get(project_id)
     if not project:
