@@ -1,0 +1,163 @@
+"""Tests for src/azure_client.py — all Azure HTTP calls are mocked."""
+
+import os
+import pytest
+from unittest.mock import patch, MagicMock
+
+
+@pytest.fixture
+def env_vars(monkeypatch):
+    monkeypatch.setenv("AGENT_TOKEN", "test-token")
+    monkeypatch.setenv("AZURE_PAT", "fake-pat")
+    monkeypatch.setenv("AZURE_ORG", "MyOrg")
+    monkeypatch.setenv("AZURE_PROJECT", "MyProject")
+    monkeypatch.setenv("AZURE_REPO", "my-repo")
+
+
+@pytest.fixture
+def client(env_vars, tmp_path, monkeypatch):
+    monkeypatch.setenv("TASKS_DB", str(tmp_path / "tasks.db"))
+
+    import importlib
+    import src.task_store as ts
+    import src.azure_client as ac
+    import src.auth as auth
+    import app as app_module
+
+    importlib.reload(ts)
+    importlib.reload(ac)
+    importlib.reload(auth)
+    importlib.reload(app_module)
+
+    app_module.app.testing = True
+    with app_module.app.test_client() as c:
+        yield c
+
+
+_HEADERS = {"X-Agent-Token": "test-token"}
+
+
+def _mock_post_response(pr_id: int):
+    m = MagicMock()
+    m.ok = True
+    m.json.return_value = {"pullRequestId": pr_id}
+    return m
+
+
+def _mock_get_pr_response(status: str = "active"):
+    m = MagicMock()
+    m.ok = True
+    m.status_code = 200
+    m.json.return_value = {"pullRequestId": 123, "status": status}
+    return m
+
+
+def _mock_statuses_response(state: str = "succeeded"):
+    m = MagicMock()
+    m.ok = True
+    m.json.return_value = {"value": [{"state": state}]}
+    return m
+
+
+# ─── POST /azure/pull-requests ───────────────────────────────────────────────
+
+def test_create_pull_requests_happy_path(client):
+    with patch("src.azure_client.requests.post") as mock_post:
+        mock_post.side_effect = [_mock_post_response(101), _mock_post_response(102)]
+        resp = client.post("/azure/pull-requests", json={
+            "branch":      "feature/ZNRX-1_test",
+            "aux_branch":  "feature/ZNRX-1_test_developer_auxiliar",
+            "title":       "ZNRX-1 — test PR",
+            "description": "test",
+            "repo":        "my-repo",
+            "target":      "developer",
+        }, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["feature_pr"]["pr_id"] == 101
+    assert data["aux_pr"]["pr_id"] == 102
+    assert "dev.azure.com" in data["feature_pr"]["pr_url"]
+
+
+def test_create_pull_requests_missing_fields(client):
+    resp = client.post("/azure/pull-requests", json={"branch": "feat/x"}, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "Missing" in resp.get_json()["error"]
+
+
+def test_create_pull_requests_azure_error(client):
+    with patch("src.azure_client.requests.post") as mock_post:
+        m = MagicMock()
+        m.ok = False
+        m.status_code = 422
+        m.text = "TF401179"
+        mock_post.return_value = m
+        resp = client.post("/azure/pull-requests", json={
+            "branch": "feat/x", "aux_branch": "feat/x_aux",
+            "title": "T", "repo": "my-repo",
+        }, headers=_HEADERS)
+    assert resp.status_code == 502
+
+
+def test_create_pull_requests_no_token(client):
+    resp = client.post("/azure/pull-requests", json={
+        "branch": "feat/x", "aux_branch": "feat/x_aux",
+        "title": "T", "repo": "my-repo",
+    })
+    assert resp.status_code == 401
+
+
+# ─── GET /azure/pull-requests/<pr_id> ────────────────────────────────────────
+
+def test_get_pull_request_active(client):
+    with patch("src.azure_client.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _mock_get_pr_response("active"),
+            _mock_statuses_response("succeeded"),
+        ]
+        resp = client.get("/azure/pull-requests/123?repo=my-repo", headers=_HEADERS)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pr_id"] == 123
+    assert data["status"] == "active"
+    assert data["build_status"] == "succeeded"
+    assert "dev.azure.com" in data["pr_url"]
+
+
+def test_get_pull_request_completed(client):
+    with patch("src.azure_client.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _mock_get_pr_response("completed"),
+            _mock_statuses_response("succeeded"),
+        ]
+        resp = client.get("/azure/pull-requests/123?repo=my-repo", headers=_HEADERS)
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "completed"
+
+
+def test_get_pull_request_build_failed(client):
+    with patch("src.azure_client.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _mock_get_pr_response("active"),
+            _mock_statuses_response("failed"),
+        ]
+        resp = client.get("/azure/pull-requests/123?repo=my-repo", headers=_HEADERS)
+    assert resp.status_code == 200
+    assert resp.get_json()["build_status"] == "failed"
+
+
+def test_get_pull_request_not_found(client):
+    with patch("src.azure_client.requests.get") as mock_get:
+        m = MagicMock()
+        m.ok = False
+        m.status_code = 404
+        mock_get.return_value = m
+        resp = client.get("/azure/pull-requests/999?repo=my-repo", headers=_HEADERS)
+    assert resp.status_code == 404
+
+
+def test_get_pull_request_missing_repo_param(client):
+    # No repo param and AZURE_REPO not set for this test
+    with patch.dict(os.environ, {"AZURE_REPO": ""}):
+        resp = client.get("/azure/pull-requests/123", headers=_HEADERS)
+    assert resp.status_code == 400
