@@ -165,14 +165,15 @@ def run():
         try:
             repo_root = Path(body["repo"])
             branch = body["branch"]
-            base_branch = body.get("base_branch", "developer")
+            base_branch = body.get("base_branch", "develop")
+            target = body.get("target", "developer")
             file_paths = [Path(f) for f in body["files"]]
             ticket = body["ticket"]
             commit_msg = body["commit_message"]
 
             create_feature_branch(repo_root, branch, base_branch)
             commit_id = git_add_commit_push(repo_root, file_paths, ticket, commit_msg, branch)
-            aux_branch = create_auxiliary_branch(repo_root, branch, file_paths, ticket, commit_msg)
+            aux_branch = create_auxiliary_branch(repo_root, branch, target, file_paths, ticket, commit_msg)
 
             repo_name = repo_root.name
             task_store.upsert({

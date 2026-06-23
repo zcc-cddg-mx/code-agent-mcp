@@ -31,10 +31,10 @@ Ejemplo real (PR-2505):
 - Aux: `feature/RITM2521020_relatividades_junio_test_aux` (creada desde `origin/test`)
 - PR: aux → `test`
 
-- [ ] Corregir `create_feature_branch()` en `placer.py` — default `base_branch` debe ser `develop`
-- [ ] Corregir `create_auxiliary_branch()` en `placer.py` — sufijo y base branch deben derivarse del `target`, no estar hardcodeados a `_developer_auxiliar` / `origin/developer`
-- [ ] Actualizar `POST /run` — añadir campo `target` (`developer` | `test` | `main`) para parametrizar la aux branch
-- [ ] Actualizar tests de `placer.py` para cubrir ambos casos (target=developer, target=test)
+- [x] Corregir `create_feature_branch()` en `placer.py` — default `base_branch` debe ser `develop`
+- [x] Corregir `create_auxiliary_branch()` en `placer.py` — sufijo y base branch deben derivarse del `target`, no estar hardcodeados a `_developer_auxiliar` / `origin/developer`
+- [x] Actualizar `POST /run` — añadir campo `target` (`developer` | `test` | `main`) para parametrizar la aux branch
+- [x] Actualizar tests de `placer.py` para cubrir ambos casos (target=developer, target=test)
 
 ---
 
