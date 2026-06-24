@@ -108,12 +108,6 @@ Estado actual: servicio funcional y verificado con detección automática de ram
 
 ## Próximas fases
 
-- [ ] **Votos en PRs** (`POST /azure/pull-requests/<pr_id>/vote`) — aprobar, rechazar o abstenerse en un PR como reviewer:
-  - `POST /azure/pull-requests/<pr_id>/vote` con body `{"repo": "...", "vote": "approve"|"reject"|"abstain"|"reset"}`
-  - Azure DevOps API: `PUT /_apis/git/repositories/{repo}/pullrequests/{pr_id}/reviewers/{reviewer_id}` con campo `vote` (10=approve, -10=reject, 0=reset)
-  - Requiere obtener el `reviewer_id` del PAT configurado (via `GET /_apis/profile/profiles/me`)
-  - Devuelve `{pr_id, reviewer_id, vote, pr_url}`
-
 - [x] **Registro de PRs en SQLite** (`src/pr_store.py`, tabla `prs` separada de `tasks`):
   - Campos: `pr_id` (PK, Azure DevOps ID), `pr_url`, `repo`, `source_branch`, `target_branch`, `title`, `status`, `task_id` (nullable FK a tasks), `created_at`, `updated_at`
   - Poblar desde `POST /azure/prepare-and-pr`, `POST /azure/pull-requests` y `PATCH /azure/pull-requests/<pr_id>`
@@ -134,5 +128,11 @@ Estado actual: servicio funcional y verificado con detección automática de ram
 - [ ] `docker-compose.yml` para levantar `code-agent-mcp` + `claude-mcp-jira` juntos en local
 - [ ] `GET /tasks` — paginación (actualmente solo `limit`)
 - [ ] UI para editar el diccionario de ramas (`PUT /config/branches`)
-- [ ] PostgreSQL — migrar desde SQLite si se necesita concurrencia real (múltiples repos simultáneos)
+
+## Versiones futuras
+
+- **Votos en PRs** (`POST /azure/pull-requests/<pr_id>/vote`) — aprobar, rechazar o abstenerse como reviewer:
+  - Body: `{"repo": "...", "vote": "approve"|"reject"|"abstain"|"reset"}`
+  - Azure DevOps API: `PUT /_apis/git/repositories/{repo}/pullrequests/{pr_id}/reviewers/{reviewer_id}` (vote: 10=approve, -10=reject, 0=reset)
+  - Requiere obtener el `reviewer_id` del PAT via `GET /_apis/profile/profiles/me`
 - [ ] Rate limiting en `POST /run` y `POST /azure/prepare-and-pr` (por token o por repo)
