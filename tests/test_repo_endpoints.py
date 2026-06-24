@@ -1,4 +1,4 @@
-"""Tests for /repos and /projects endpoints in app.py."""
+"""Tests for /repos, /projects, and /run endpoints in app.py."""
 
 import pytest
 from unittest.mock import patch
@@ -257,3 +257,39 @@ def test_get_repo_includes_branches_by_role(client):
 
     data = client.get("/repos/ov-arizona-restat", headers=_HEADERS).get_json()
     assert "branches_by_role" in data
+
+
+# ─── POST /run — registry validation ─────────────────────────────────────────
+
+_RUN_BODY = {
+    "repo":           "/tmp/ov-arizona-restat",
+    "branch":         "feature/test",
+    "files":          ["/tmp/ov-arizona-restat/src/File.java"],
+    "ticket":         "ZNRX-001",
+    "commit_message": "test commit",
+}
+
+
+def test_run_repo_not_registered_returns_403(client):
+    """POST /run rejects repos not in the registry."""
+    resp = client.post("/run", json=_RUN_BODY, headers=_HEADERS)
+    assert resp.status_code == 403
+    body = resp.get_json()
+    assert body["status"] == "error"
+    assert "not registered" in body["error"]
+
+
+def test_run_registered_repo_is_accepted(client):
+    """POST /run accepts repos present in the registry."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos",
+                    json={"git_url": _URL_OV_RESTAT},
+                    headers=_HEADERS)
+
+    with patch("src.placer.create_feature_branch"), \
+         patch("src.placer.git_add_commit_push", return_value="abc123"), \
+         patch("src.placer.create_auxiliary_branch", return_value="feature/test_developer_auxiliar"):
+        resp = client.post("/run", json={**_RUN_BODY, "repo": "/tmp/ov-arizona-restat"}, headers=_HEADERS)
+
+    assert resp.status_code == 202
+    assert resp.get_json()["status"] in ("queued", "rejected")

@@ -137,6 +137,18 @@ import src.branch_config as _bc
 import src.repo_store as _rs
 
 
+def _check_repo_registered(repo_name: str):
+    """Return (repo_record, None) if registered, or (None, error_response) if not."""
+    record = _rs.get_by_name(repo_name)
+    if not record:
+        return None, (
+            jsonify({"error": f"Repository '{repo_name}' is not registered. "
+                              "Register it first with POST /repos."}),
+            403,
+        )
+    return record, None
+
+
 def _resolve_base_and_files(
     body: dict,
     repo_path: _Path,
@@ -302,6 +314,10 @@ def prepare_and_pr_preview():
         return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
 
     repo: str = body["repo"]
+    _, err = _check_repo_registered(repo)
+    if err:
+        return err
+
     repo_path = _Path(body["repo_path"])
     branch: str = body["branch"]
     target: str = body["target"]
@@ -407,6 +423,10 @@ def prepare_and_pr():
         return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
 
     repo: str = body["repo"]
+    _, err = _check_repo_registered(repo)
+    if err:
+        return err
+
     repo_path = _Path(body["repo_path"])
     branch: str = body["branch"]
     target: str = body["target"]

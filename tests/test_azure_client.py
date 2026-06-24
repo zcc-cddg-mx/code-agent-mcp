@@ -4,6 +4,13 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
+_REGISTERED_REPO = {
+    "repo_id": "repo-001",
+    "name": "my-repo",
+    "git_url": "https://dev.azure.com/MyOrg/MyProject/_git/my-repo",
+    "branch_roles": {"develop": "base", "test": "integration", "developer": "integration"},
+}
+
 
 @pytest.fixture
 def env_vars(monkeypatch):
@@ -30,8 +37,10 @@ def client(env_vars, tmp_path, monkeypatch):
     importlib.reload(app_module)
 
     app_module.app.testing = True
-    with app_module.app.test_client() as c:
-        yield c
+    # Default: repo is registered. Tests that need "not registered" patch this to return None.
+    with patch("src.repo_store.get_by_name", return_value=_REGISTERED_REPO):
+        with app_module.app.test_client() as c:
+            yield c
 
 
 _HEADERS = {"X-Agent-Token": "test-token"}
@@ -521,3 +530,23 @@ def test_update_pr_no_token(client):
     resp = client.patch("/azure/pull-requests/123",
                         json={"repo": "my-repo", "status": "abandoned"})
     assert resp.status_code == 401
+
+
+# ─── Registry validation (403 when repo not registered) ──────────────────────
+
+def test_prepare_and_pr_repo_not_registered(client):
+    with patch("src.repo_store.get_by_name", return_value=None):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 403
+    assert "not registered" in resp.get_json()["error"]
+
+
+def test_preview_repo_not_registered(client, tmp_path):
+    body = {
+        "repo": "unknown-repo", "repo_path": str(tmp_path),
+        "branch": "feature/x", "target": "test",
+    }
+    with patch("src.repo_store.get_by_name", return_value=None):
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 403
+    assert "not registered" in resp.get_json()["error"]

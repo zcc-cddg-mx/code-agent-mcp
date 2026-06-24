@@ -101,11 +101,10 @@ Estado actual: servicio funcional y verificado con detección automática de ram
 
 ## Antes de producción
 
-- [ ] **Seguridad basada en registro de repos** — el registro de repos (`POST /repos`) es el allowlist definido por el usuario:
-  - `POST /azure/prepare-and-pr` y `POST /run`: verificar que `repo` esté registrado en `repo_store`; si no → 403 con mensaje claro
-  - `repo_path` recibido en el body se valida contra el path local del repo registrado (evita que un caller pase rutas arbitrarias del sistema de archivos)
-  - Azure DevOps ya impone los permisos del PAT en todas las llamadas REST — si el usuario no tiene acceso al repo en Azure, la API devuelve 403/404 automáticamente
-  - No se necesita una variable de entorno `ALLOWED_REPO_PATHS`; el registro dinámico es suficiente y más flexible
+- [x] **Seguridad basada en registro de repos** — el registro de repos (`POST /repos`) es el allowlist definido por el usuario:
+  - `POST /azure/prepare-and-pr`, `POST /azure/prepare-and-pr/preview` y `POST /run` → 403 si el repo no está registrado
+  - Azure DevOps ya impone los permisos del PAT en todas las llamadas REST
+  - 4 tests: prepare-and-pr, preview, POST /run no registrado, POST /run registrado
 
 ## Próximas fases
 

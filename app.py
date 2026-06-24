@@ -228,6 +228,13 @@ def run():
     if not isinstance(files, list) or not files:
         return jsonify({"status": "error", "error": "'files' must be a non-empty list"}), 400
 
+    repo_name = Path(body["repo"]).name
+    if not repo_store.get_by_name(repo_name):
+        return jsonify({
+            "status": "error",
+            "error": f"Repository '{repo_name}' is not registered. Register it first with POST /repos.",
+        }), 403
+
     task_id = str(uuid.uuid4())[:8]
     now = _now_iso()
     callback_url: str = body.get("callback_url", "")
