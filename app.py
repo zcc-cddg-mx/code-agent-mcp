@@ -51,6 +51,7 @@ task_store.init_db()
 repo_store.init_db()
 project_store.init_db()
 pr_store.init_db()
+branch_config.init_db()
 
 Swagger(app, template={
     "swagger": "2.0",
@@ -439,7 +440,7 @@ def get_branch_config():
 @app.put("/config/branches")
 @require_token
 def put_branch_config():
-    """Update the branch registry (merged with defaults, persisted to disk).
+    """Update the branch registry (merged with defaults, persisted to SQLite).
     ---
     tags: [Configuration]
     parameters:

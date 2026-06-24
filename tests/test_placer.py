@@ -1,9 +1,21 @@
 """Tests for src/placer.py — git calls are mocked via subprocess."""
 
+import importlib
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 from src.placer import aux_branch_name, create_feature_branch, create_auxiliary_branch, git_add_commit_push, ensure_auxiliary_branch, detect_changed_files, detect_base_branch
+
+
+@pytest.fixture(autouse=True)
+def branch_config_db(monkeypatch, tmp_path):
+    """Provide a real SQLite DB for branch_config so default branch lookups work."""
+    monkeypatch.setenv("TASKS_DB", str(tmp_path / "tasks.db"))
+    import src.branch_config as bc
+    importlib.reload(bc)
+    bc.init_db()
+    yield
+    bc._registry = None
 
 
 # ─── aux_branch_name ─────────────────────────────────────────────────────────

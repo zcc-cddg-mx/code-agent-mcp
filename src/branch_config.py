@@ -1,8 +1,7 @@
-"""Branch dictionary — maps target branch names to their metadata.
+"""Branch dictionary — maps branch names to their metadata.
 
-Default config is built from the ov-arizona-backend-ecuador README.
-Can be overridden at runtime via BRANCH_CONFIG_PATH env var (path to a JSON file)
-or via the future UI config layer (POST /config/branches).
+Persisted in the SQLite DB (TASKS_DB) in a dedicated `branch_config` table.
+Defaults are seeded on first init_db() if the table is empty.
 
 Schema of each entry:
   {
@@ -18,7 +17,11 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import threading
 from pathlib import Path
+
+_lock = threading.Lock()
 
 _DEFAULTS: dict[str, dict] = {
     "developer": {
@@ -51,25 +54,53 @@ _DEFAULTS: dict[str, dict] = {
     },
 }
 
-# Runtime override — future UI layer will write to this path
-_CONFIG_PATH = Path(os.environ.get("BRANCH_CONFIG_PATH", "/data/branch_config.json"))
+_CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS branch_config (
+    branch  TEXT PRIMARY KEY,
+    meta    TEXT NOT NULL
+)
+"""
 
+# In-process cache; cleared by reload()
 _registry: dict[str, dict] | None = None
 
 
+def _connect() -> sqlite3.Connection:
+    db_path = Path(os.environ.get("TASKS_DB", "/data/tasks.db"))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    """Create table and seed defaults if the table is empty."""
+    with _lock, _connect() as conn:
+        conn.execute(_CREATE_TABLE)
+        if not conn.execute("SELECT 1 FROM branch_config LIMIT 1").fetchone():
+            for branch, meta in _DEFAULTS.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO branch_config (branch, meta) VALUES (?, ?)",
+                    (branch, json.dumps(meta, ensure_ascii=False)),
+                )
+
+
 def _load() -> dict[str, dict]:
-    if _CONFIG_PATH.exists():
-        try:
-            data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return {**_DEFAULTS, **data}
-        except (ValueError, OSError):
-            pass
+    with _lock, _connect() as conn:
+        rows = conn.execute("SELECT branch, meta FROM branch_config").fetchall()
+    if rows:
+        result = {}
+        for row in rows:
+            try:
+                result[row["branch"]] = json.loads(row["meta"])
+            except (ValueError, TypeError):
+                pass
+        return result
     return dict(_DEFAULTS)
 
 
 def get_registry() -> dict[str, dict]:
-    """Return the branch registry, loading from disk on first call."""
+    """Return the branch registry, loading from DB on first call."""
     global _registry
     if _registry is None:
         _registry = _load()
@@ -77,10 +108,10 @@ def get_registry() -> dict[str, dict]:
 
 
 def reload() -> dict[str, dict]:
-    """Force reload from disk. Called after UI writes a new config file."""
+    """Invalidate in-process cache and reload from DB."""
     global _registry
-    _registry = _load()
-    return _registry
+    _registry = None
+    return get_registry()
 
 
 def get(branch: str) -> dict | None:
@@ -89,7 +120,7 @@ def get(branch: str) -> dict | None:
 
 
 def label(branch: str) -> str:
-    """Return human-readable label for *branch*, falling back to the branch name itself."""
+    """Return human-readable label for *branch*, falling back to the branch name."""
     entry = get(branch)
     return entry["label"] if entry else branch
 
@@ -114,11 +145,16 @@ def known_targets() -> list[str]:
 
 
 def save(new_config: dict[str, dict]) -> None:
-    """Persist a new branch config to disk (future UI layer calls this).
+    """Replace the branch registry with *new_config* merged over defaults.
 
-    Merges with defaults so unknown fields in _DEFAULTS are preserved.
+    Writes to SQLite and invalidates the in-process cache.
     """
-    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     merged = {**_DEFAULTS, **new_config}
-    _CONFIG_PATH.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM branch_config")
+        for branch, meta in merged.items():
+            conn.execute(
+                "INSERT INTO branch_config (branch, meta) VALUES (?, ?)",
+                (branch, json.dumps(meta, ensure_ascii=False)),
+            )
     reload()

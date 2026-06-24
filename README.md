@@ -75,7 +75,7 @@ Ejemplo (PR-2505):
 - Aux: `feature/RITM2521020_relatividades_junio_test_auxiliar` (desde `origin/test`)
 - PR: aux → `test`
 
-El diccionario de ramas define cuáles son de integración y cuál es la base para cortar features:
+El diccionario de ramas persiste en SQLite (misma DB que `TASKS_DB`) y sobrevive reinicios del servidor. Define cuáles son ramas de integración y cuál es la base para cortar features:
 
 | Rama | Label | Rol |
 |---|---|---|
@@ -191,13 +191,13 @@ src/
   task_store.py         — SQLite: tabla tasks (async task pattern)
   repo_store.py         — SQLite: tabla repos
   project_store.py      — SQLite: tabla projects
-  branch_config.py      — diccionario dinámico de ramas (con hot-reload)
+  branch_config.py      — diccionario de ramas persistido en SQLite (tabla branch_config)
   repo_inspector.py     — parsea URLs Azure DevOps, git ls-remote, clasifica ramas
   placer.py             — operaciones git: branch, commit, push, aux branch
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (130 tests)
+tests/                  — pytest (133 tests)
 arch/                   — diseño y plan de integración
 ```
 

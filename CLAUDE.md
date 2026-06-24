@@ -32,7 +32,7 @@ src/
   task_store.py         — SQLite: tasks table (async task pattern)
   repo_store.py         — SQLite: repos table
   project_store.py      — SQLite: projects table (slug = {org}/{name})
-  branch_config.py      — dynamic branch registry with hot-reload; BRANCH_CONFIG_PATH override
+  branch_config.py      — branch registry persisted in SQLite (branch_config table); seeded from _DEFAULTS on first init
   repo_inspector.py     — parse Azure DevOps URLs, git ls-remote, classify branches
   placer.py             — git: create_feature_branch, git_add_commit_push, create_auxiliary_branch
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status (Flask Blueprint)
@@ -67,7 +67,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `GET` | `/projects` | List projects (with repos list) |
 | `GET` | `/projects/<org>/<name>` | Get project by slug |
 | `GET` | `/config/branches` | Get branch registry |
-| `PUT` | `/config/branches` | Update branch registry (hot-reload) |
+| `PUT` | `/config/branches` | Update branch registry (persisted to SQLite) |
 | `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detect base branch + files, no side effects |
 | `POST` | `/azure/prepare-and-pr` | Ensure aux branch + create aux PR only (idempotent) |
 | `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
@@ -89,7 +89,6 @@ TASKS_DB=/data/tasks.db
 PORT=5000
 CALLBACK_VERIFY_SSL=true
 RETENTION_DAYS=90
-BRANCH_CONFIG_PATH=   # optional: path to branch config JSON override
 ```
 
 ## Git flow (from ov-arizona-backend-ecuador README)
