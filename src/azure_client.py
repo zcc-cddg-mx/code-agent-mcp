@@ -592,3 +592,93 @@ def get_pull_request(pr_id: int):
         "build_status": build_status,
         "pr_url": pr_url,
     })
+
+
+@azure_bp.patch("/azure/pull-requests/<int:pr_id>")
+@require_token
+def update_pull_request(pr_id: int):
+    """Complete, abandon, or reactivate a pull request.
+    ---
+    tags: [Azure DevOps]
+    parameters:
+      - in: path
+        name: pr_id
+        type: integer
+        required: true
+        example: 2560
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [repo, status]
+          properties:
+            repo:
+              type: string
+              description: Azure DevOps repository name
+              example: ov-arizona-frontend-ecuador
+            status:
+              type: string
+              enum: [completed, abandoned, active]
+              description: >
+                completed — merge and close the PR;
+                abandoned — close without merging;
+                active    — reactivate an abandoned PR
+              example: completed
+    responses:
+      200:
+        description: PR updated
+        schema:
+          type: object
+          properties:
+            pr_id:   {type: integer}
+            status:  {type: string}
+            pr_url:  {type: string}
+      400:
+        description: Missing or invalid fields
+      404:
+        description: PR not found
+      502:
+        description: Azure DevOps API error
+    """
+    body = request.get_json(silent=True) or {}
+    repo = body.get("repo") or request.args.get("repo", os.environ.get("AZURE_REPO", ""))
+    status_req = body.get("status", "").lower()
+
+    if not repo:
+        return jsonify({"error": "repo is required (body or query param)"}), 400
+
+    valid_statuses = ("completed", "abandoned", "active")
+    if status_req not in valid_statuses:
+        return jsonify({"error": f"status must be one of: {', '.join(valid_statuses)}"}), 400
+
+    # Fetch current PR to get lastMergeSourceCommit (required for completion)
+    try:
+        pr_data = _get_pr(repo, pr_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    if not pr_data:
+        return jsonify({"error": "PR not found"}), 404
+
+    patch_body: dict = {"status": status_req}
+    if status_req == "completed":
+        last_commit = (pr_data.get("lastMergeSourceCommit") or {}).get("commitId")
+        if last_commit:
+            patch_body["lastMergeSourceCommit"] = {"commitId": last_commit}
+
+    url = (
+        f"https://dev.azure.com/{_ORG}/{_PROJECT}/_apis/git/repositories"
+        f"/{repo}/pullrequests/{pr_id}?api-version={_API_VERSION}"
+    )
+    log("AZURE", f"PATCH PR #{pr_id} → status={status_req}")
+    resp = requests.patch(url, json=patch_body, headers=_auth_header(),
+                          verify=_VERIFY_SSL, timeout=30)
+    if not resp.ok:
+        return jsonify({"error": f"Azure DevOps error: {resp.status_code} {resp.text[:300]}"}), 502
+
+    updated = resp.json()
+    return jsonify({
+        "pr_id":  pr_id,
+        "status": updated.get("status", status_req),
+        "pr_url": _pr_url(_ORG, _PROJECT, repo, pr_id),
+    }), 200

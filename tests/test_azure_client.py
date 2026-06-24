@@ -415,3 +415,109 @@ def test_preview_does_not_create_aux_branch_or_pr(client, tmp_path):
         client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
     mock_ensure.assert_not_called()
     mock_create.assert_not_called()
+
+
+# ─── PATCH /azure/pull-requests/<pr_id> ─────────────────────────────────────
+
+def _mock_patch_response(pr_id: int, status: str):
+    m = MagicMock()
+    m.ok = True
+    m.json.return_value = {"pullRequestId": pr_id, "status": status}
+    return m
+
+
+def _mock_get_pr_with_commit(pr_id: int = 123, commit_id: str = "abc123"):
+    m = MagicMock()
+    m.ok = True
+    m.status_code = 200
+    m.json.return_value = {
+        "pullRequestId": pr_id,
+        "status": "active",
+        "lastMergeSourceCommit": {"commitId": commit_id},
+    }
+    return m
+
+
+def test_update_pr_complete(client):
+    with patch("src.azure_client.requests.get", return_value=_mock_get_pr_with_commit()), \
+         patch("src.azure_client.requests.patch", return_value=_mock_patch_response(123, "completed")) as mock_patch:
+        resp = client.patch("/azure/pull-requests/123",
+                            json={"repo": "my-repo", "status": "completed"},
+                            headers=_HEADERS)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pr_id"] == 123
+    assert data["status"] == "completed"
+    assert "dev.azure.com" in data["pr_url"]
+    # lastMergeSourceCommit must be sent when completing
+    patch_body = mock_patch.call_args.kwargs["json"]
+    assert patch_body["lastMergeSourceCommit"]["commitId"] == "abc123"
+
+
+def test_update_pr_abandon(client):
+    with patch("src.azure_client.requests.get", return_value=_mock_get_pr_with_commit()), \
+         patch("src.azure_client.requests.patch", return_value=_mock_patch_response(123, "abandoned")) as mock_patch:
+        resp = client.patch("/azure/pull-requests/123",
+                            json={"repo": "my-repo", "status": "abandoned"},
+                            headers=_HEADERS)
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "abandoned"
+    # No lastMergeSourceCommit for abandon
+    patch_body = mock_patch.call_args.kwargs["json"]
+    assert "lastMergeSourceCommit" not in patch_body
+
+
+def test_update_pr_reactivate(client):
+    with patch("src.azure_client.requests.get", return_value=_mock_get_pr_with_commit()), \
+         patch("src.azure_client.requests.patch", return_value=_mock_patch_response(123, "active")):
+        resp = client.patch("/azure/pull-requests/123",
+                            json={"repo": "my-repo", "status": "active"},
+                            headers=_HEADERS)
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "active"
+
+
+def test_update_pr_invalid_status(client):
+    resp = client.patch("/azure/pull-requests/123",
+                        json={"repo": "my-repo", "status": "merged"},
+                        headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "status must be one of" in resp.get_json()["error"]
+
+
+def test_update_pr_missing_repo(client, monkeypatch):
+    monkeypatch.delenv("AZURE_REPO", raising=False)
+    resp = client.patch("/azure/pull-requests/123",
+                        json={"status": "abandoned"},
+                        headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "repo is required" in resp.get_json()["error"]
+
+
+def test_update_pr_not_found(client):
+    m = MagicMock()
+    m.ok = False
+    m.status_code = 404
+    with patch("src.azure_client.requests.get", return_value=m):
+        resp = client.patch("/azure/pull-requests/999",
+                            json={"repo": "my-repo", "status": "abandoned"},
+                            headers=_HEADERS)
+    assert resp.status_code == 404
+
+
+def test_update_pr_azure_error(client):
+    with patch("src.azure_client.requests.get", return_value=_mock_get_pr_with_commit()), \
+         patch("src.azure_client.requests.patch") as mock_patch:
+        mock_patch.return_value.ok = False
+        mock_patch.return_value.status_code = 422
+        mock_patch.return_value.text = "TF400813"
+        resp = client.patch("/azure/pull-requests/123",
+                            json={"repo": "my-repo", "status": "completed"},
+                            headers=_HEADERS)
+    assert resp.status_code == 502
+
+
+def test_update_pr_no_token(client):
+    resp = client.patch("/azure/pull-requests/123",
+                        json={"repo": "my-repo", "status": "abandoned"})
+    assert resp.status_code == 401
