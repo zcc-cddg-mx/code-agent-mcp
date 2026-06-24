@@ -39,6 +39,7 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `POST` | `/azure/prepare-and-pr` | Verificar/crear aux branch + crear PR auxiliar (idempotente) |
 | `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
+| `PATCH` | `/azure/pull-requests/<pr_id>` | Completar / abandonar / reactivar PR |
 
 Scripts de referencia en `apis/`:
 

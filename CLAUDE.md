@@ -72,6 +72,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `POST` | `/azure/prepare-and-pr` | Ensure aux branch + create aux PR only (idempotent) |
 | `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | PR status + CI build status |
+| `PATCH` | `/azure/pull-requests/<pr_id>` | Complete / abandon / reactivate PR |
 
 ## Environment variables
 
