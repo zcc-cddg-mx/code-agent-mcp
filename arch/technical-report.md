@@ -1,8 +1,8 @@
 # Reporte Técnico — code-agent-mcp
 
-**Versión:** 1.0  
-**Fecha:** 2026-06-23  
-**Estado:** Funcional — probado end-to-end contra Azure DevOps (Zurich Insurance Ecuador)
+**Versión:** 1.2  
+**Fecha:** 2026-06-24  
+**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 133 tests.
 
 ---
 
@@ -42,7 +42,7 @@ El orquestador decide qué archivos generar, qué ticket procesar, y cuándo cre
 |---|---|
 | Runtime | Python 3.12, Conda env `code-agent-mcp` |
 | Framework HTTP | Flask + flasgger (Swagger UI en `/apidocs/`) |
-| Persistencia | SQLite (tres tablas: `tasks`, `repos`, `projects`) |
+| Persistencia | SQLite (cinco tablas: `tasks`, `repos`, `projects`, `branch_config`, `prs`) |
 | Git | `subprocess` → CLI git con HTTPS + PAT |
 | Azure DevOps | REST API v7.1 (autenticación Basic + PAT) |
 
@@ -52,16 +52,18 @@ El orquestador decide qué archivos generar, qué ticket procesar, y cuándo cre
 app.py                  — Flask entry point; todos los endpoints; async task pattern
 src/
   auth.py               — middleware X-Agent-Token → 401
-  task_store.py         — SQLite: tabla tasks (async task pattern)
+  task_store.py         — SQLite: tabla tasks (async task pattern + step tracking)
   repo_store.py         — SQLite: tabla repos (incluyendo branch_roles JSON)
   project_store.py      — SQLite: tabla projects (slug {org}/{name})
-  branch_config.py      — diccionario de ramas con hot-reload; campo role por rama
+  branch_config.py      — diccionario de ramas persistido en SQLite; hot-reload; campo role por rama
+  pr_store.py           — SQLite: tabla prs; poblada desde prepare-and-pr y pull-requests
   repo_inspector.py     — parsea URLs Azure DevOps; git ls-remote; auto_assign_roles()
-  placer.py             — git: create_feature_branch, ensure_auxiliary_branch, git_add_commit_push
+  placer.py             — git: create_feature_branch, ensure_auxiliary_branch,
+                          detect_changed_files, detect_base_branch, git_add_commit_push
   azure_client.py       — Azure DevOps REST API: _create_pr, _find_existing_pr, blueprints
   logger.py             — log estructurado con prefijo [MÓDULO]
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (62+ tests)
+tests/                  — pytest (133 tests)
 arch/                   — diseño y documentación técnica
 ```
 
@@ -77,7 +79,7 @@ Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` e
 |---|---|---|
 | `GET` | `/health` | Liveness check (sin token) |
 | `POST` | `/run` | Encolar tarea git: branch + commit + push + aux branch → 202 |
-| `GET` | `/status/<task_id>` | Consultar estado de tarea (polling) |
+| `GET` | `/status/<task_id>` | Consultar estado de tarea (polling); incluye campo `steps` |
 | `GET` | `/tasks` | Tareas recientes (`?ticket=`, `?limit=`) |
 | `POST` | `/repos` | Registrar repositorio + inspección inmediata |
 | `GET` | `/repos` | Listar repositorios registrados |
@@ -88,35 +90,45 @@ Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` e
 | `GET` | `/projects` | Listar proyectos Azure DevOps (con repos) |
 | `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
 | `GET` | `/config/branches` | Ver diccionario de ramas |
-| `PUT` | `/config/branches` | Actualizar diccionario de ramas (hot-reload) |
+| `PUT` | `/config/branches` | Actualizar diccionario de ramas (persiste en SQLite) |
+| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada |
 | `POST` | `/azure/prepare-and-pr` | **Endpoint principal:** verificar/crear aux branch + PR auxiliar (idempotente) |
 | `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
+| `PATCH` | `/azure/pull-requests/<pr_id>` | Completar / abandonar / reactivar PR |
+| `GET` | `/prs` | Listar PRs persistidos (`?repo=`, `?status=`, `?task_id=`, `?limit=`) |
+| `GET` | `/prs/<pr_id>` | PR con estado refrescado desde Azure DevOps |
 
 ### 3.2 Endpoint principal: `POST /azure/prepare-and-pr`
 
 Encapsula el flujo completo de rama auxiliar y PR en una sola llamada idempotente.
 
-**Request:**
+**Request (campos `files` y `base_branch` opcionales):**
 ```json
 {
   "repo":        "ov-arizona-backend-ecuador",
   "repo_path":   "/ruta/local/al/clon/del/repo",
   "branch":      "feature/ZNRX_67108_renov_agosto",
-  "files":       ["/ruta/local/al/repo/src/migrations/V001__data.sql"],
   "target":      "test",
   "ticket":      "ZNRX-67108",
   "title":       "ZNRX-67108 Renovaciones agosto → test",
+  "files":       ["/ruta/local/al/repo/src/File.java"],
+  "base_branch": "develop",
   "description": "Generado automáticamente por claude-mcp-jira"
 }
 ```
 
-**Response (201 — creado / actualizado):**
+Si `files` se omite: auto-detectado via `git diff --name-only origin/{base_branch}...origin/{branch}`.  
+Si `base_branch` se omite: inferido via `git merge-base` comparando con los candidatos del repo registrado (base-role primero, luego integration).
+
+**Response (201):**
 ```json
 {
-  "aux_branch": "feature/ZNRX_67108_renov_agosto_test_auxiliar",
-  "action":     "created",
-  "pr":         {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
+  "aux_branch":     "feature/ZNRX_67108_renov_agosto_test_auxiliar",
+  "action":         "created",
+  "base_branch":    "develop",
+  "files_detected": ["/ruta/local/al/repo/src/File.java"],
+  "pr":             {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
 }
 ```
 
@@ -125,6 +137,25 @@ Encapsula el flujo completo de rama auxiliar y PR en una sola llamada idempotent
 | `created` | Rama auxiliar no existía; creada desde `origin/{target}` |
 | `updated` | Rama existía pero archivos diferían; cambios aplicados |
 | `unchanged` | Rama y PR ya existían y están al día; PR devuelto sin duplicar |
+
+### 3.3 Preview (dry-run): `POST /azure/prepare-and-pr/preview`
+
+Mismos campos que `prepare-and-pr` pero `ticket` y `title` son opcionales. No crea nada — solo ejecuta la fase de detección y consulta si ya existe un PR.
+
+**Response (200):**
+```json
+{
+  "branch":         "feature/test_mcp_jira_multifile",
+  "target":         "test",
+  "base_branch":    "develop",
+  "aux_branch":     "feature/test_mcp_jira_multifile_test_auxiliar",
+  "files_detected": ["...avisos.component.css", "...avisos.component.html", "...avisos.component.ts"],
+  "existing_pr":    {"pr_id": 2560, "pr_url": "..."} | null
+}
+```
+
+`existing_pr: null` → ejecutar `prepare-and-pr` creará el PR.  
+`existing_pr: {...}` → ya existe PR activo; `prepare-and-pr` lo devolverá sin duplicar.
 
 ---
 
@@ -153,7 +184,7 @@ La asignación sigue esta prioridad:
 3. Si está en el conjunto de nombres de integración conocidos → `"integration"`
 4. Default → `"other"`
 
-Roles predefinidos en el diccionario global:
+Roles predefinidos en el diccionario global (persiste en SQLite, configurable vía API):
 
 | Rama | Rol | Notas |
 |---|---|---|
@@ -164,7 +195,15 @@ Roles predefinidos en el diccionario global:
 
 Los roles se pueden corregir por repo sin re-inspeccionar: `PATCH /repos/<name>/branches/<branch>`.
 
-### 4.3 Creación de rama auxiliar (`ensure_auxiliary_branch`)
+### 4.3 Detección automática de archivos y rama base
+
+**`detect_changed_files(repo_root, feature_branch, base_branch)` → `list[Path]`**  
+Ejecuta `git diff --name-only origin/{base_branch}...origin/{feature_branch}`. Ambas ramas deben estar fetched. Lanza `RuntimeError` en caso de fallo git.
+
+**`detect_base_branch(repo_root, feature_branch, candidates)` → `str`**  
+Para cada candidato ejecuta `git merge-base origin/{candidate} origin/{feature_branch}` + `git rev-list --count {hash}`. Elige el de menor distancia. En empate, gana el primero de la lista (poner base-role primero). Fallback al primer candidato si todos los merge-base fallan.
+
+### 4.4 Creación de rama auxiliar (`ensure_auxiliary_branch`)
 
 ```
 1. git fetch origin {target}
@@ -179,9 +218,9 @@ Si NO existe:
     8. git checkout {HEAD original}
     9. git branch -D {aux}              ← limpieza local
 
-Si EXISTS:
+Si existe:
     4. git fetch origin {aux}
-    5. Comparar contenido de cada archivo: origin/{feature} vs origin/{aux}
+    5. Comparar contenido: origin/{feature}:{file} vs origin/{aux}:{file}
     6. Si todos coinciden → retorna "unchanged"
     7. Si hay diferencias:
        git checkout -b {aux}_update_tmp origin/{aux}
@@ -195,6 +234,18 @@ Si EXISTS:
 
 La función siempre restaura el HEAD al estado previo y elimina ramas temporales locales.
 
+### 4.5 Step tracking en `POST /run`
+
+El worker inicializa los tres pasos como `pending` al arrancar y los actualiza en tiempo real:
+
+```
+create_branch   → pending → running → done | failed
+commit_push     → pending → running → done | failed
+create_aux_branch → pending → running → done | failed
+```
+
+El campo `steps` (JSON) se devuelve en `GET /status/<task_id>`. Si un paso falla, los siguientes quedan en `pending`.
+
 ---
 
 ## 5. Persistencia
@@ -204,7 +255,7 @@ La función siempre restaura el HEAD al estado previo y elimina ramas temporales
 **`tasks`** — operaciones git asíncronas
 ```
 task_id, ticket, status, branch, aux_branch, commit_id,
-repo, build_status, summary, error, created_at, updated_at
+repo, build_status, summary, error, steps (JSON), created_at, updated_at
 ```
 
 **`repos`** — repositorios registrados
@@ -220,11 +271,29 @@ project_id (slug org/name), org, name, azure_project_id,
 description, visibility, state, web_url, created_at, updated_at
 ```
 
-### 5.2 Migración para instancias existentes
+**`branch_config`** — diccionario de ramas
+```
+branch (PK), meta (JSON: label, environment, url, is_base, role)
+```
+Sembrado con 4 defaults en el primer `init_db()`. Configurable vía `PUT /config/branches`.
 
-Si la base de datos fue creada antes de la funcionalidad de roles de ramas:
+**`prs`** — pull requests Azure DevOps
+```
+pr_id (PK), pr_url, repo, source_branch, target_branch,
+title, status, task_id (nullable FK), created_at, updated_at
+```
+Poblada desde `prepare-and-pr`, `pull-requests` y `PATCH pull-requests/<id>`.
+
+### 5.2 Seguridad — registro como allowlist
+
+El registro de repos en SQLite actúa como allowlist definido por el usuario. `POST /azure/prepare-and-pr`, `POST /azure/prepare-and-pr/preview` y `POST /run` devuelven **403** si el repo no está registrado. El Azure DevOps PAT provee una segunda capa de autorización en todas las llamadas REST.
+
+### 5.3 Migración para instancias existentes
+
 ```bash
-sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"
+sqlite3 /tmp/code-agent-mcp.db \
+  "ALTER TABLE repos ADD COLUMN branch_roles TEXT;
+   ALTER TABLE tasks ADD COLUMN steps TEXT;"
 ```
 
 ---
@@ -241,9 +310,8 @@ sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"
 | `AZURE_PROJECT` | Sí | Proyecto default para creación de PRs |
 | `GIT_USERNAME` | Sí | Usuario para autenticación git HTTPS |
 | `GIT_PAT` | Sí | PAT para autenticación git HTTPS |
-| `TASKS_DB` | Sí | Ruta al archivo SQLite |
+| `TASKS_DB` | Sí | Ruta al archivo SQLite (todas las tablas comparten este archivo) |
 | `PORT` | No | Puerto del servidor (default: 5000) |
-| `BRANCH_CONFIG_PATH` | No | Ruta a JSON de configuración de ramas (hot-reload) |
 | `RETENTION_DAYS` | No | Días de retención de tareas en SQLite (default: 90) |
 | `CALLBACK_VERIFY_SSL` | No | Verificar SSL en callbacks (default: `true`) |
 
@@ -251,8 +319,8 @@ sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"
 
 ```bash
 # Crear .env.local con las variables anteriores
-./run_local.sh   # sourcea .env.local, sets TASKS_DB=/tmp/code-agent-mcp.db
-                 # levanta en puerto 5001
+./run_local.sh   # mata proceso existente en el puerto, sourcea .env.local,
+                 # sets TASKS_DB=/tmp/code-agent-mcp.db, levanta en puerto 5001
 ```
 
 > **Nota:** `conda run` no hereda variables del shell padre. Siempre usar `run_local.sh` o pasar las variables explícitamente.
@@ -263,26 +331,28 @@ sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/          # suite completa
-pytest tests/test_placer.py -v            # git operations
-pytest tests/test_azure_client.py -v      # Azure DevOps API
+pytest tests/                             # suite completa (133 tests)
+pytest tests/test_placer.py -v            # git operations + detección automática
+pytest tests/test_azure_client.py -v      # Azure DevOps API + registry validation
 pytest tests/test_repo_inspector.py -v    # repo inspection + role assignment
-pytest tests/test_repo_endpoints.py -v    # /repos y /projects endpoints
+pytest tests/test_repo_endpoints.py -v    # /repos, /projects, /run endpoints
+pytest tests/test_branch_config.py -v     # diccionario de ramas SQLite
+pytest tests/test_pr_store.py -v          # PR persistence + endpoints
 ```
 
 Todos los tests mockean subprocess y requests — no requieren conexión a Azure DevOps ni un repo git real.
 
 ---
 
-## 8. Pendiente (backlog)
+## 8. Backlog
 
 | Prioridad | Ítem |
 |---|---|
 | Alta | Cliente HTTP en `claude-mcp-jira` + MCP tools (`run_code_agent`, `get_code_agent_status`, `create_azure_pull_request`, `get_pull_request_status`) |
-| Media | Registro de PRs en SQLite (`src/pr_store.py`, tabla `prs` separada de `tasks`) con endpoints `GET /prs` y `GET /prs/<pr_id>` |
 | Baja | `docker-compose.yml` para desarrollo conjunto con `claude-mcp-jira` |
 | Baja | Paginación en `GET /tasks` |
 | Baja | UI para editar diccionario de ramas |
+| Futura | Votos en PRs (`PUT /azure/pull-requests/<pr_id>/vote` — approve/reject/abstain/reset) |
 
 ---
 
