@@ -12,7 +12,7 @@ The full design is in `arch/integration-plan.md`. Read it before starting any im
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/          # 57 tests
+pytest tests/          # 133 tests
 ./run_local.sh         # starts server on port 5001, reads .env.local
 ```
 
@@ -36,6 +36,7 @@ src/
   repo_inspector.py     — parse Azure DevOps URLs, git ls-remote, classify branches
   placer.py             — git: create_feature_branch, git_add_commit_push, create_auxiliary_branch
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status (Flask Blueprint)
+  pr_store.py           — SQLite: prs table; populated from prepare-and-pr and pull-requests
   logger.py             — structured logging
 apis/                   — curl reference scripts (health, repos, projects, tasks, config, azure)
 tests/                  — pytest suite
@@ -122,7 +123,7 @@ Feature branches are cut from `develop` (not `developer`). Auxiliary branches ar
 `GET /repos/<name>` returns `branch_roles` (persisted) plus `branches_by_role` (computed inverse, not persisted).
 `PATCH /repos/<name>/branches/<branch>` lets callers override a single branch role without re-inspecting.
 
-**DB migration for existing installs:** `sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT;"`
+**DB migration for existing installs:** `sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT; ALTER TABLE tasks ADD COLUMN steps TEXT;"`
 
 ## Key constraints
 
