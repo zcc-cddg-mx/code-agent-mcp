@@ -84,25 +84,37 @@ El diccionario de ramas define cuáles son de integración y cuál es la base pa
 
 `POST /azure/prepare-and-pr` es el endpoint principal para crear PRs. Es idempotente: se puede llamar varias veces con los mismos datos sin efectos secundarios.
 
+**Campos requeridos:** `repo`, `repo_path`, `branch`, `target`, `ticket`, `title`
+**Campos opcionales:** `files`, `base_branch`, `description`
+
+Si `files` no se envía, el agente detecta automáticamente los archivos cambiados usando `git diff --name-only origin/{base_branch}...origin/{branch}`.
+
 ```
 POST /azure/prepare-and-pr
 {
   "repo":       "ov-arizona-backend-ecuador",
   "repo_path":  "/ruta/local/al/repo",
   "branch":     "feature/ZNRX_67108_renov_agosto",
-  "files":      ["/ruta/local/al/repo/src/File.java"],
   "target":     "test",
   "ticket":     "ZNRX-67108",
   "title":      "ZNRX-67108 Renovaciones agosto → test"
 }
 ```
 
+Para pasar los archivos explícitamente (opcional):
+```json
+{
+  "files": ["/ruta/local/al/repo/src/File.java"]
+}
+```
+
 Respuesta:
 ```json
 {
-  "aux_branch": "feature/ZNRX_67108_renov_agosto_test_auxiliar",
-  "action":     "created",
-  "pr":         {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
+  "aux_branch":     "feature/ZNRX_67108_renov_agosto_test_auxiliar",
+  "action":         "created",
+  "files_detected": ["/ruta/local/al/repo/src/File.java"],
+  "pr":             {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
 }
 ```
 
@@ -110,6 +122,8 @@ Respuesta:
 - `created` — rama auxiliar no existía; se creó desde `origin/{target}`
 - `updated` — rama existía pero tenía archivos desactualizados; se aplicaron los cambios
 - `unchanged` — rama y PR ya existían; se devuelve el PR sin crear duplicado
+
+`files_detected` lista los archivos que se integraron (detectados automáticamente o pasados explícitamente).
 
 ## Registro de repositorios y proyectos
 
@@ -148,7 +162,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (57 tests)
+tests/                  — pytest (80 tests)
 arch/                   — diseño y plan de integración
 ```
 

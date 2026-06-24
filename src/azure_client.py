@@ -160,7 +160,7 @@ def prepare_and_pr():
         required: true
         schema:
           type: object
-          required: [repo, repo_path, branch, files, target, ticket, title]
+          required: [repo, repo_path, branch, target, ticket, title]
           properties:
             repo:
               type: string
@@ -177,8 +177,12 @@ def prepare_and_pr():
             files:
               type: array
               items: {type: string}
-              description: Absolute paths of files to integrate
+              description: Absolute paths of files to integrate. If omitted, auto-detected via git diff.
               example: [/home/idavid/dev/ov/ov-arizona-backend-ecuador/README.md]
+            base_branch:
+              type: string
+              description: Base branch for auto-detecting changed files (default from branch config)
+              example: develop
             target:
               type: string
               description: Integration branch (aux PR target)
@@ -194,36 +198,35 @@ def prepare_and_pr():
               example: "Generado automáticamente por code-agent-mcp"
     responses:
       200:
-        description: PR already existed (action=unchanged)
+        description: PR already existed
       201:
         description: Aux branch created/updated and PR created
         schema:
           type: object
           properties:
-            aux_branch: {type: string}
-            action:     {type: string, enum: [created, updated, unchanged]}
+            aux_branch:     {type: string}
+            action:         {type: string, enum: [created, updated, unchanged]}
+            files_detected: {type: array, items: {type: string}}
             pr:
               type: object
               properties:
                 pr_id:  {type: integer}
                 pr_url: {type: string}
       400:
-        description: Missing required fields
+        description: Missing required fields or no changed files detected
       502:
         description: Git or Azure DevOps error
     """
+    import subprocess as _sp
     from pathlib import Path as _Path
-    from src.placer import ensure_auxiliary_branch
+    from src.placer import ensure_auxiliary_branch, detect_changed_files
+    import src.branch_config as _bc
 
     body = request.get_json(silent=True) or {}
-    required = ("repo", "repo_path", "branch", "files", "target", "ticket", "title")
+    required = ("repo", "repo_path", "branch", "target", "ticket", "title")
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
-
-    files = body["files"]
-    if not isinstance(files, list) or not files:
-        return jsonify({"error": "'files' must be a non-empty list"}), 400
 
     repo: str = body["repo"]
     repo_path = _Path(body["repo_path"])
@@ -232,7 +235,32 @@ def prepare_and_pr():
     ticket: str = body["ticket"]
     title: str = body["title"]
     description: str = body.get("description", "")
-    file_paths = [_Path(f) for f in files]
+    base_branch: str = body.get("base_branch") or _bc.base_branch()
+
+    raw_files = body.get("files")
+    if raw_files is not None:
+        if not isinstance(raw_files, list) or not raw_files:
+            return jsonify({"error": "'files' must be a non-empty list"}), 400
+        file_paths = [_Path(f) for f in raw_files]
+        files_detected = [str(f) for f in file_paths]
+    else:
+        r = str(repo_path.resolve())
+        try:
+            _sp.run(["git", "-C", r, "fetch", "origin", branch], check=True,
+                    capture_output=True, text=True)
+            _sp.run(["git", "-C", r, "fetch", "origin", base_branch], check=True,
+                    capture_output=True, text=True)
+        except _sp.CalledProcessError as exc:
+            return jsonify({"error": f"git fetch failed: {exc.stderr.strip()}"}), 502
+        try:
+            file_paths = detect_changed_files(repo_path, branch, base_branch)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if not file_paths:
+            return jsonify({"error": "No changed files detected between "
+                                     f"origin/{base_branch}...origin/{branch}"}), 400
+        files_detected = [str(f) for f in file_paths]
+        log("AZURE", f"auto-detected {len(file_paths)} file(s): {files_detected}")
 
     try:
         aux_branch, action = ensure_auxiliary_branch(
@@ -245,7 +273,12 @@ def prepare_and_pr():
     existing_pr = _find_existing_pr(repo, aux_branch, target)
     if existing_pr:
         log("AZURE", f"PR already exists for {aux_branch} → {target}: {existing_pr['pr_id']}")
-        return jsonify({"aux_branch": aux_branch, "action": action, "pr": existing_pr}), 200
+        return jsonify({
+            "aux_branch": aux_branch,
+            "action": action,
+            "files_detected": files_detected,
+            "pr": existing_pr,
+        }), 200
 
     try:
         pr = _create_pr(repo, aux_branch, target, title, description)
@@ -253,7 +286,12 @@ def prepare_and_pr():
         log("AZURE", f"PR creation error: {exc}")
         return jsonify({"error": str(exc)}), 502
 
-    return jsonify({"aux_branch": aux_branch, "action": action, "pr": pr}), 201
+    return jsonify({
+        "aux_branch": aux_branch,
+        "action": action,
+        "files_detected": files_detected,
+        "pr": pr,
+    }), 201
 
 
 @azure_bp.post("/azure/pull-requests")

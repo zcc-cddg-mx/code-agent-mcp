@@ -57,6 +57,12 @@ Estado actual: servicio funcional con registro de repos/proyectos, roles de rama
 - [x] `apis/azure.sh prepare-and-pr` — subcomando curl de referencia
 - [x] Probado: `feature/test_mcp_server` → `test` (PR #2554); segunda llamada devuelve mismo PR sin duplicar
 
+### Detección automática de archivos cambiados
+- [x] `src/placer.py` — `detect_changed_files(repo_root, feature_branch, base_branch)`: `git diff --name-only origin/{base}...origin/{feature}` → `list[Path]`
+- [x] `POST /azure/prepare-and-pr` — campo `files` ahora opcional; si no se envía, auto-detecta con `detect_changed_files`; campo `base_branch` opcional (default: `develop`)
+- [x] Respuesta incluye `files_detected` — lista los archivos integrados (sean detectados o explícitos)
+- [x] Tests: `test_detect_changed_files_*` (3 tests) + `test_prepare_and_pr_auto_detect*` (3 tests)
+
 ### Documentación y tooling
 - [x] Swagger UI via flasgger (`/apidocs/`)
 - [x] `run_local.sh` — arranque local sin Docker

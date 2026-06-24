@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
-from src.placer import aux_branch_name, create_feature_branch, create_auxiliary_branch, git_add_commit_push, ensure_auxiliary_branch
+from src.placer import aux_branch_name, create_feature_branch, create_auxiliary_branch, git_add_commit_push, ensure_auxiliary_branch, detect_changed_files
 
 
 # ─── aux_branch_name ─────────────────────────────────────────────────────────
@@ -187,3 +187,28 @@ def test_ensure_auxiliary_branch_updates_when_files_differ(tmp_path):
     assert action == "updated"
     all_calls = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
     assert any("commit" in c for c in all_calls)
+
+
+# ─── detect_changed_files ────────────────────────────────────────────────────
+
+def test_detect_changed_files_happy_path(tmp_path):
+    mock_result = MagicMock(returncode=0, stdout="src/foo.py\nREADME.md\n", stderr="")
+    with patch("src.placer.subprocess.run", return_value=mock_result):
+        paths = detect_changed_files(tmp_path, "feature/X", "develop")
+    assert len(paths) == 2
+    assert paths[0] == tmp_path.resolve() / "src/foo.py"
+    assert paths[1] == tmp_path.resolve() / "README.md"
+
+
+def test_detect_changed_files_no_changes(tmp_path):
+    mock_result = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("src.placer.subprocess.run", return_value=mock_result):
+        paths = detect_changed_files(tmp_path, "feature/X", "develop")
+    assert paths == []
+
+
+def test_detect_changed_files_git_error(tmp_path):
+    mock_result = MagicMock(returncode=128, stdout="", stderr="fatal: ambiguous argument")
+    with patch("src.placer.subprocess.run", return_value=mock_result):
+        with pytest.raises(RuntimeError, match="git diff failed"):
+            detect_changed_files(tmp_path, "feature/X", "develop")

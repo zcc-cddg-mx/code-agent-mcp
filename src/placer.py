@@ -20,6 +20,28 @@ from src.logger import log
 import src.branch_config as branch_config
 
 
+def detect_changed_files(repo_root: Path, feature_branch: str, base_branch: str) -> list[Path]:
+    """Return absolute paths of files changed in feature_branch relative to base_branch.
+
+    Uses git diff --name-only origin/{base}...origin/{feature}.
+    Both branches must already be fetched from origin before calling this.
+    Raises RuntimeError if git diff fails.
+    """
+    r = str(Path(repo_root).resolve())
+    result = subprocess.run(
+        ["git", "-C", r, "diff", "--name-only",
+         f"origin/{base_branch}...origin/{feature_branch}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed for {base_branch}...{feature_branch}: {result.stderr.strip()}"
+        )
+    rel_paths = [p for p in result.stdout.strip().splitlines() if p]
+    abs_root = Path(repo_root).resolve()
+    return [abs_root / p for p in rel_paths]
+
+
 def aux_branch_name(feature_branch: str, target: str) -> str:
     """Return the canonical auxiliary branch name for a given target.
 

@@ -220,3 +220,65 @@ def test_prepare_and_pr_git_error(client):
     with patch("src.placer.ensure_auxiliary_branch", side_effect=RuntimeError("git failed")):
         resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
     assert resp.status_code == 502
+
+
+def test_prepare_and_pr_response_includes_files_detected(client):
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2562)):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert "files_detected" in data
+    assert data["files_detected"] == ["/tmp/fake-repo/README.md"]
+
+
+# ─── POST /azure/prepare-and-pr — auto-detect files ─────────────────────────
+
+_PREPARE_BODY_NO_FILES = {
+    "repo":      "my-repo",
+    "repo_path": "/tmp/fake-repo",
+    "branch":    "feature/test_mcp_server",
+    "target":    "test",
+    "ticket":    "test_mcp",
+    "title":     "test_mcp → test",
+}
+
+
+def test_prepare_and_pr_auto_detects_files(client, tmp_path):
+    detected = [tmp_path / "README.md"]
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2563)):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREPARE_BODY_NO_FILES)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["action"] == "created"
+    assert len(data["files_detected"]) == 1
+    assert "README.md" in data["files_detected"][0]
+
+
+def test_prepare_and_pr_auto_detect_no_changes(client, tmp_path):
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=[]):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREPARE_BODY_NO_FILES)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "No changed files" in resp.get_json()["error"]
+
+
+def test_prepare_and_pr_auto_detect_fetch_error(client, tmp_path):
+    import subprocess
+    with patch("subprocess.run", side_effect=subprocess.CalledProcessError(128, "git", stderr="fatal")):
+        body = dict(_PREPARE_BODY_NO_FILES)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    assert resp.status_code == 502
+    assert "git fetch failed" in resp.get_json()["error"]
