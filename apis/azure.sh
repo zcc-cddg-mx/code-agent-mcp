@@ -6,6 +6,7 @@
 #   ./azure.sh prepare-and-pr — ensure aux branch exists/updated, create aux PR only
 #   ./azure.sh create         — create feature PR + aux PR (legacy)
 #   ./azure.sh status         — get PR status + CI build status (PR_ID, REPO_NAME)
+#   ./azure.sh patch-pr       — complete/abandon/reactivate a PR (PR_ID, REPO_NAME, PR_STATUS)
 
 BASE="${BASE_URL:-http://localhost:5001}"
 TOKEN="${TOKEN_AZURE:-dev-local}"
@@ -66,8 +67,16 @@ case "${1:-status}" in
       -H "X-Agent-Token: $TOKEN" | python3 -m json.tool
     ;;
 
+  patch-pr)
+    PR_ID="${PR_ID:?set PR_ID env var}"
+    REPO_NAME="${REPO_NAME:?set REPO_NAME env var}"
+    PR_STATUS="${PR_STATUS:?set PR_STATUS env var (completed|abandoned|active)}"
+    curl -s -X PATCH "$BASE/azure/pull-requests/$PR_ID" "${H[@]}" \
+      -d "{\"repo\": \"$REPO_NAME\", \"status\": \"$PR_STATUS\"}" | python3 -m json.tool
+    ;;
+
   *)
-    echo "Usage: $0 {preview|prepare-and-pr|create|status}"
+    echo "Usage: $0 {preview|prepare-and-pr|create|status|patch-pr}"
     exit 1
     ;;
 esac
