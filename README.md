@@ -35,6 +35,7 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
 | `GET` | `/config/branches` | Ver diccionario de ramas |
 | `PUT` | `/config/branches` | Actualizar diccionario de ramas |
+| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada |
 | `POST` | `/azure/prepare-and-pr` | Verificar/crear aux branch + crear PR auxiliar (idempotente) |
 | `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
@@ -79,6 +80,35 @@ El diccionario de ramas define cuáles son de integración y cuál es la base pa
 | `test` | pruebas | integración Preprod |
 | `develop` | producción-pre | **base para features** |
 | `main` | producción | producción desplegada |
+
+## Preview de cambios (dry-run)
+
+`POST /azure/prepare-and-pr/preview` detecta la rama base y los archivos que se integrarán **sin crear nada** — sin rama auxiliar, sin PR. Útil para mostrar una confirmación al usuario antes de ejecutar.
+
+```
+POST /azure/prepare-and-pr/preview
+{
+  "repo":      "ov-arizona-frontend-ecuador",
+  "repo_path": "/ruta/local/al/repo",
+  "branch":    "feature/test_mcp_jira_multifile",
+  "target":    "test"
+}
+```
+
+Respuesta:
+```json
+{
+  "branch":         "feature/test_mcp_jira_multifile",
+  "target":         "test",
+  "base_branch":    "develop",
+  "aux_branch":     "feature/test_mcp_jira_multifile_test_auxiliar",
+  "files_detected": ["...avisos.component.css", "...avisos.component.html", "...avisos.component.ts"],
+  "existing_pr":    {"pr_id": 2560, "pr_url": "..."} | null
+}
+```
+
+`existing_pr: null` — el PR no existe aún; `prepare-and-pr` lo creará.
+`existing_pr: {...}` — ya hay PR activo; `prepare-and-pr` lo devolverá sin duplicar.
 
 ## Flujo de PR auxiliar (recomendado)
 
@@ -164,7 +194,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (86 tests)
+tests/                  — pytest (92 tests)
 arch/                   — diseño y plan de integración
 ```
 

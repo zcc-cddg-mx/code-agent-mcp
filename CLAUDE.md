@@ -68,6 +68,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `GET` | `/projects/<org>/<name>` | Get project by slug |
 | `GET` | `/config/branches` | Get branch registry |
 | `PUT` | `/config/branches` | Update branch registry (hot-reload) |
+| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detect base branch + files, no side effects |
 | `POST` | `/azure/prepare-and-pr` | Ensure aux branch + create aux PR only (idempotent) |
 | `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | PR status + CI build status |

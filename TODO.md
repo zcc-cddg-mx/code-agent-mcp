@@ -1,6 +1,6 @@
 # TODO — code-agent-mcp
 
-Estado actual: servicio funcional con registro de repos/proyectos, roles de ramas, verificación idempotente de rama auxiliar, creación de PR (solo auxiliar), Swagger UI, y scripts curl de referencia. Probado end-to-end contra Azure DevOps (`ov-arizona-backend-ecuador`, PRs #2552–#2554).
+Estado actual: servicio funcional y verificado con detección automática de rama base y archivos. Probado end-to-end contra Azure DevOps en dos repositorios (`ov-arizona-backend-ecuador` PRs #2552–#2554, `ov-arizona-frontend-ecuador` PRs #2558–#2561). Pruebas de integración aceptadas (2026-06-24).
 
 ---
 
@@ -62,6 +62,13 @@ Estado actual: servicio funcional con registro de repos/proyectos, roles de rama
 - [x] `POST /azure/prepare-and-pr` — campo `files` ahora opcional; si no se envía, auto-detecta con `detect_changed_files`; campo `base_branch` opcional (default: `develop`)
 - [x] Respuesta incluye `files_detected` — lista los archivos integrados (sean detectados o explícitos)
 - [x] Tests: `test_detect_changed_files_*` (3 tests) + `test_prepare_and_pr_auto_detect*` (3 tests)
+
+### Preview / dry-run
+- [x] `POST /azure/prepare-and-pr/preview` — mismo body que `prepare-and-pr` (sin `ticket`/`title`); detecta `base_branch` y `files_detected` sin crear nada; devuelve además `existing_pr` (PR activo si ya existe, `null` si no)
+- [x] Lógica de detección extraída a `_resolve_base_and_files()` — compartida por `prepare-and-pr` y `preview`
+- [x] `apis/azure.sh preview` — subcomando curl de referencia
+- [x] Tests: happy path con files explícitos, auto-detect sin PR, no changes → 400, fetch error → 502, sin efectos secundarios (ensure_auxiliary_branch y _create_pr no llamados)
+- [x] Probado: `feature/test_mcp_jira_multifile` → `test` devuelve `base_branch=develop`, 3 archivos, `existing_pr.pr_id=2560`
 
 ### Detección automática de rama base
 - [x] `src/placer.py` — `detect_base_branch(repo_root, feature_branch, candidates)`: `git merge-base` + `rev-list --count` para encontrar el ancestro más cercano

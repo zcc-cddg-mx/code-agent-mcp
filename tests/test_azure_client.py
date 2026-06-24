@@ -327,3 +327,91 @@ def test_prepare_and_pr_auto_detects_base_from_repo_roles(client, tmp_path):
     call_args = mock_detect_base.call_args
     candidates = call_args[0][2]
     assert candidates.index("develop") < candidates.index("test")
+
+
+# ─── POST /azure/prepare-and-pr/preview ─────────────────────────────────────
+
+_PREVIEW_BODY = {
+    "repo":      "my-repo",
+    "repo_path": "/tmp/fake-repo",
+    "branch":    "feature/test_mcp_server",
+    "target":    "test",
+}
+
+
+def test_preview_happy_path_with_files(client, tmp_path):
+    existing = {"pr_id": 2560, "pr_url": "https://dev.azure.com/.../pullrequest/2560"}
+    body = dict(_PREVIEW_BODY)
+    body["files"] = ["/tmp/fake-repo/README.md"]
+    with patch("src.azure_client._find_existing_pr", return_value=existing):
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["branch"] == "feature/test_mcp_server"
+    assert data["target"] == "test"
+    assert data["aux_branch"] == "feature/test_mcp_server_test_auxiliar"
+    assert data["files_detected"] == ["/tmp/fake-repo/README.md"]
+    assert data["existing_pr"]["pr_id"] == 2560
+
+
+def test_preview_auto_detects_files_no_existing_pr(client, tmp_path):
+    detected = [tmp_path / "avisos.html"]
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.detect_base_branch", return_value="develop"), \
+         patch("src.azure_client._find_existing_pr", return_value=None):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREVIEW_BODY)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["base_branch"] == "develop"
+    assert len(data["files_detected"]) == 1
+    assert data["existing_pr"] is None
+
+
+def test_preview_missing_required_fields(client):
+    resp = client.post("/azure/prepare-and-pr/preview",
+                       json={"repo": "x"}, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "Missing" in resp.get_json()["error"]
+
+
+def test_preview_no_changed_files_returns_400(client, tmp_path):
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=[]):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREVIEW_BODY)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "No changed files" in resp.get_json()["error"]
+
+
+def test_preview_fetch_error_returns_502(client, tmp_path):
+    import subprocess
+    with patch("subprocess.run",
+               side_effect=subprocess.CalledProcessError(128, "git", stderr="fatal")):
+        body = dict(_PREVIEW_BODY)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 502
+    assert "git fetch failed" in resp.get_json()["error"]
+
+
+def test_preview_does_not_create_aux_branch_or_pr(client, tmp_path):
+    """Preview must not call ensure_auxiliary_branch or _create_pr."""
+    detected = [tmp_path / "file.ts"]
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.detect_base_branch", return_value="develop"), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.placer.ensure_auxiliary_branch") as mock_ensure, \
+         patch("src.azure_client._create_pr") as mock_create:
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREVIEW_BODY)
+        body["repo_path"] = str(tmp_path)
+        client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    mock_ensure.assert_not_called()
+    mock_create.assert_not_called()

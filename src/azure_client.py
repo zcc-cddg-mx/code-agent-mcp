@@ -120,6 +120,89 @@ def _get_build_status(repo: str, pr_id: int) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+import subprocess as _sp
+from pathlib import Path as _Path
+from src.placer import detect_changed_files, detect_base_branch
+import src.branch_config as _bc
+import src.repo_store as _rs
+
+
+def _resolve_base_and_files(
+    body: dict,
+    repo_path: _Path,
+    repo: str,
+    branch: str,
+) -> tuple[list[_Path], list[str], str]:
+    """Resolve (file_paths, files_detected, base_branch) from request body.
+
+    If body['files'] is provided, uses them directly.
+    Otherwise fetches branches and auto-detects via detect_base_branch +
+    detect_changed_files.
+
+    Raises ValueError (→ 400) or RuntimeError (→ 502) on failure.
+    """
+    from src.placer import detect_changed_files, detect_base_branch
+
+    raw_files = body.get("files")
+    if raw_files is not None:
+        if not isinstance(raw_files, list) or not raw_files:
+            raise ValueError("'files' must be a non-empty list")
+        file_paths = [_Path(f) for f in raw_files]
+        files_detected = [str(f) for f in file_paths]
+        base_branch: str = body.get("base_branch") or _bc.base_branch()
+        return file_paths, files_detected, base_branch
+
+    r = str(repo_path.resolve())
+    try:
+        _sp.run(["git", "-C", r, "fetch", "origin", branch], check=True,
+                capture_output=True, text=True)
+    except _sp.CalledProcessError as exc:
+        raise RuntimeError(f"git fetch failed: {exc.stderr.strip()}")
+
+    if body.get("base_branch"):
+        base_branch = body["base_branch"]
+        candidates = [base_branch]
+    else:
+        repo_record = _rs.get_by_name(repo)
+        if repo_record and repo_record.get("branch_roles"):
+            roles = repo_record["branch_roles"]
+            base_candidates = [b for b, role in roles.items() if role == "base"]
+            integ_candidates = [b for b, role in roles.items() if role == "integration"]
+            candidates = base_candidates + integ_candidates or [_bc.base_branch()]
+        else:
+            candidates = [_bc.base_branch()]
+
+        for c in candidates:
+            _sp.run(["git", "-C", r, "fetch", "origin", c],
+                    capture_output=True, text=True)
+
+        base_branch = detect_base_branch(repo_path, branch, candidates)
+
+    try:
+        _sp.run(["git", "-C", r, "fetch", "origin", base_branch], check=True,
+                capture_output=True, text=True)
+    except _sp.CalledProcessError as exc:
+        raise RuntimeError(f"git fetch failed: {exc.stderr.strip()}")
+
+    try:
+        file_paths = detect_changed_files(repo_path, branch, base_branch)
+    except RuntimeError:
+        raise
+
+    if not file_paths:
+        raise ValueError(
+            f"No changed files detected between origin/{base_branch}...origin/{branch}"
+        )
+
+    files_detected = [str(f) for f in file_paths]
+    log("AZURE", f"base_branch='{base_branch}', auto-detected {len(file_paths)} file(s)")
+    return file_paths, files_detected, base_branch
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -146,6 +229,96 @@ def _find_existing_pr(repo: str, source_branch: str, target_branch: str) -> dict
     pr = items[0]
     pr_id = pr["pullRequestId"]
     return {"pr_id": pr_id, "pr_url": _pr_url(_ORG, _PROJECT, repo, pr_id)}
+
+
+@azure_bp.post("/azure/prepare-and-pr/preview")
+@require_token
+def prepare_and_pr_preview():
+    """Dry-run: detect base branch and changed files without creating anything.
+    ---
+    tags: [Azure DevOps]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [repo, repo_path, branch, target]
+          properties:
+            repo:
+              type: string
+              example: ov-arizona-frontend-ecuador
+            repo_path:
+              type: string
+              example: /home/idavid/dev/ov/ov-arizona-frontend-ecuador
+            branch:
+              type: string
+              example: feature/test_mcp_jira_multifile
+            target:
+              type: string
+              example: test
+            files:
+              type: array
+              items: {type: string}
+              description: Explicit file list. If omitted, auto-detected via git diff.
+            base_branch:
+              type: string
+              description: Base branch for diff. If omitted, auto-detected via merge-base.
+    responses:
+      200:
+        description: Preview of what prepare-and-pr would do
+        schema:
+          type: object
+          properties:
+            branch:         {type: string}
+            target:         {type: string}
+            base_branch:    {type: string}
+            aux_branch:     {type: string}
+            files_detected: {type: array, items: {type: string}}
+            existing_pr:
+              type: object
+              nullable: true
+              properties:
+                pr_id:  {type: integer}
+                pr_url: {type: string}
+      400:
+        description: Missing required fields or no changed files detected
+      502:
+        description: Git fetch failed
+    """
+    from src.placer import aux_branch_name
+
+    body = request.get_json(silent=True) or {}
+    required = ("repo", "repo_path", "branch", "target")
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
+
+    repo: str = body["repo"]
+    repo_path = _Path(body["repo_path"])
+    branch: str = body["branch"]
+    target: str = body["target"]
+
+    try:
+        file_paths, files_detected, base_branch = _resolve_base_and_files(
+            body, repo_path, repo, branch
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    aux_branch = aux_branch_name(branch, target)
+    existing_pr = _find_existing_pr(repo, aux_branch, target)
+
+    return jsonify({
+        "branch":         branch,
+        "target":         target,
+        "base_branch":    base_branch,
+        "aux_branch":     aux_branch,
+        "files_detected": files_detected,
+        "existing_pr":    existing_pr,
+    }), 200
 
 
 @azure_bp.post("/azure/prepare-and-pr")
@@ -218,11 +391,7 @@ def prepare_and_pr():
       502:
         description: Git or Azure DevOps error
     """
-    import subprocess as _sp
-    from pathlib import Path as _Path
-    from src.placer import ensure_auxiliary_branch, detect_changed_files, detect_base_branch
-    import src.branch_config as _bc
-    import src.repo_store as _rs
+    from src.placer import ensure_auxiliary_branch
 
     body = request.get_json(silent=True) or {}
     required = ("repo", "repo_path", "branch", "target", "ticket", "title")
@@ -238,60 +407,14 @@ def prepare_and_pr():
     title: str = body["title"]
     description: str = body.get("description", "")
 
-    raw_files = body.get("files")
-    if raw_files is not None:
-        if not isinstance(raw_files, list) or not raw_files:
-            return jsonify({"error": "'files' must be a non-empty list"}), 400
-        file_paths = [_Path(f) for f in raw_files]
-        files_detected = [str(f) for f in file_paths]
-        base_branch: str = body.get("base_branch") or _bc.base_branch()
-    else:
-        r = str(repo_path.resolve())
-        # Fetch feature branch first; base candidates fetched below
-        try:
-            _sp.run(["git", "-C", r, "fetch", "origin", branch], check=True,
-                    capture_output=True, text=True)
-        except _sp.CalledProcessError as exc:
-            return jsonify({"error": f"git fetch failed: {exc.stderr.strip()}"}), 502
-
-        # Determine base_branch: explicit > auto-detect from repo branch_roles > config default
-        if body.get("base_branch"):
-            base_branch = body["base_branch"]
-            candidates = [base_branch]
-        else:
-            repo_record = _rs.get_by_name(repo)
-            if repo_record and repo_record.get("branch_roles"):
-                roles = repo_record["branch_roles"]
-                # base-role branches first (prefer the canonical feature base), then integration
-                base_candidates = [b for b, role in roles.items() if role == "base"]
-                integ_candidates = [b for b, role in roles.items() if role == "integration"]
-                candidates = base_candidates + integ_candidates or [_bc.base_branch()]
-            else:
-                candidates = [_bc.base_branch()]
-
-            # Fetch all candidates so merge-base can be computed
-            for c in candidates:
-                _sp.run(["git", "-C", r, "fetch", "origin", c],
-                        capture_output=True, text=True)
-
-            base_branch = detect_base_branch(repo_path, branch, candidates)
-
-        # Ensure base_branch is fetched (covers explicit case too)
-        try:
-            _sp.run(["git", "-C", r, "fetch", "origin", base_branch], check=True,
-                    capture_output=True, text=True)
-        except _sp.CalledProcessError as exc:
-            return jsonify({"error": f"git fetch failed: {exc.stderr.strip()}"}), 502
-
-        try:
-            file_paths = detect_changed_files(repo_path, branch, base_branch)
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 502
-        if not file_paths:
-            return jsonify({"error": "No changed files detected between "
-                                     f"origin/{base_branch}...origin/{branch}"}), 400
-        files_detected = [str(f) for f in file_paths]
-        log("AZURE", f"base_branch='{base_branch}', auto-detected {len(file_paths)} file(s)")
+    try:
+        file_paths, files_detected, base_branch = _resolve_base_and_files(
+            body, repo_path, repo, branch
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
 
     try:
         aux_branch, action = ensure_auxiliary_branch(
