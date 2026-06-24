@@ -43,12 +43,14 @@ from src.logger import log
 from src import task_store
 from src import repo_store
 from src import project_store
+import src.pr_store as pr_store
 import src.branch_config as branch_config
 
 app = Flask(__name__)
 task_store.init_db()
 repo_store.init_db()
 project_store.init_db()
+pr_store.init_db()
 
 Swagger(app, template={
     "swagger": "2.0",
@@ -74,6 +76,7 @@ Swagger(app, template={
 
 _RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 task_store.cleanup_old_records(days=_RETENTION_DAYS)
+pr_store.cleanup_old_records(days=_RETENTION_DAYS)
 
 _CALLBACK_RETRIES = 3
 _CALLBACK_BACKOFF_BASE = 2  # seconds: 2, 4, 8

@@ -20,6 +20,7 @@ Optional env var:  AZURE_REPO (default repo name when not provided in body)
 from __future__ import annotations
 
 import os
+import time
 from base64 import b64encode
 
 import requests
@@ -27,8 +28,14 @@ from flask import Blueprint, jsonify, request
 
 from src.auth import require_token
 from src.logger import log
+import src.pr_store as _prs
 
 azure_bp = Blueprint("azure", __name__)
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+
 
 _ORG = os.environ.get("AZURE_ORG", "")
 _PROJECT = os.environ.get("AZURE_PROJECT", "")
@@ -427,6 +434,12 @@ def prepare_and_pr():
     existing_pr = _find_existing_pr(repo, aux_branch, target)
     if existing_pr:
         log("AZURE", f"PR already exists for {aux_branch} → {target}: {existing_pr['pr_id']}")
+        _prs.upsert({
+            "pr_id": existing_pr["pr_id"], "pr_url": existing_pr["pr_url"],
+            "repo": repo, "source_branch": aux_branch, "target_branch": target,
+            "title": title, "status": "active",
+            "task_id": body.get("task_id"),
+        }, _now_iso())
         return jsonify({
             "aux_branch": aux_branch,
             "action": action,
@@ -440,6 +453,13 @@ def prepare_and_pr():
     except RuntimeError as exc:
         log("AZURE", f"PR creation error: {exc}")
         return jsonify({"error": str(exc)}), 502
+
+    _prs.upsert({
+        "pr_id": pr["pr_id"], "pr_url": pr["pr_url"],
+        "repo": repo, "source_branch": aux_branch, "target_branch": target,
+        "title": title, "status": "active",
+        "task_id": body.get("task_id"),
+    }, _now_iso())
 
     return jsonify({
         "aux_branch": aux_branch,
@@ -531,6 +551,18 @@ def create_pull_requests():
     except RuntimeError as exc:
         log("AZURE", f"PR creation error: {exc}")
         return jsonify({"error": str(exc)}), 502
+
+    now = _now_iso()
+    _prs.upsert({
+        "pr_id": feature_pr["pr_id"], "pr_url": feature_pr["pr_url"],
+        "repo": repo, "source_branch": branch, "target_branch": target,
+        "title": title, "status": "active",
+    }, now)
+    _prs.upsert({
+        "pr_id": aux_pr["pr_id"], "pr_url": aux_pr["pr_url"],
+        "repo": repo, "source_branch": aux_branch, "target_branch": target,
+        "title": f"{title} [auxiliar]", "status": "active",
+    }, now)
 
     return jsonify({"feature_pr": feature_pr, "aux_pr": aux_pr}), 201
 
@@ -677,8 +709,107 @@ def update_pull_request(pr_id: int):
         return jsonify({"error": f"Azure DevOps error: {resp.status_code} {resp.text[:300]}"}), 502
 
     updated = resp.json()
+    final_status = updated.get("status", status_req)
+    _prs.update_status(pr_id, final_status, _now_iso())
     return jsonify({
         "pr_id":  pr_id,
-        "status": updated.get("status", status_req),
+        "status": final_status,
         "pr_url": _pr_url(_ORG, _PROJECT, repo, pr_id),
     }), 200
+
+
+@azure_bp.get("/prs")
+@require_token
+def list_prs():
+    """List pull requests stored in the local registry.
+    ---
+    tags: [Pull Requests]
+    parameters:
+      - in: query
+        name: repo
+        type: string
+        description: Filter by repository name
+      - in: query
+        name: status
+        type: string
+        description: Filter by status (active|completed|abandoned)
+      - in: query
+        name: task_id
+        type: string
+        description: Filter by originating task_id
+      - in: query
+        name: limit
+        type: integer
+        default: 50
+    responses:
+      200:
+        description: List of PR records
+    """
+    repo = request.args.get("repo") or None
+    status = request.args.get("status") or None
+    task_id = request.args.get("task_id") or None
+    try:
+        limit = int(request.args.get("limit", 50))
+    except ValueError:
+        limit = 50
+    return jsonify(_prs.list_all(repo=repo, status=status, task_id=task_id, limit=limit))
+
+
+@azure_bp.get("/prs/<int:pr_id>")
+@require_token
+def get_pr_record(pr_id: int):
+    """Get a stored PR record, refreshing its status from Azure DevOps.
+    ---
+    tags: [Pull Requests]
+    parameters:
+      - in: path
+        name: pr_id
+        type: integer
+        required: true
+        example: 2560
+      - in: query
+        name: repo
+        type: string
+        description: Repository name (required if not already stored)
+    responses:
+      200:
+        description: PR record with refreshed status
+      404:
+        description: PR not found in registry
+      502:
+        description: Azure DevOps API error
+    """
+    record = _prs.get(pr_id)
+    repo = (record or {}).get("repo") or request.args.get("repo", os.environ.get("AZURE_REPO", ""))
+
+    if not repo:
+        return jsonify({"error": "repo is required (query param or register the PR first)"}), 400
+
+    try:
+        pr_data = _get_pr(repo, pr_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    if not pr_data:
+        if not record:
+            return jsonify({"error": "PR not found"}), 404
+        return jsonify(record)
+
+    live_status = pr_data.get("status", "active")
+    if record and record.get("status") != live_status:
+        _prs.update_status(pr_id, live_status, _now_iso())
+
+    if record:
+        record["status"] = live_status
+        return jsonify(record)
+
+    # PR not yet in registry — return live data without persisting
+    return jsonify({
+        "pr_id":        pr_id,
+        "pr_url":       _pr_url(_ORG, _PROJECT, repo, pr_id),
+        "repo":         repo,
+        "source_branch": pr_data.get("sourceRefName", "").removeprefix("refs/heads/"),
+        "target_branch": pr_data.get("targetRefName", "").removeprefix("refs/heads/"),
+        "title":        pr_data.get("title"),
+        "status":       live_status,
+    })

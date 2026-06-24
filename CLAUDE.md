@@ -73,6 +73,8 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | PR status + CI build status |
 | `PATCH` | `/azure/pull-requests/<pr_id>` | Complete / abandon / reactivate PR |
+| `GET` | `/prs` | List stored PRs; `?repo=`, `?status=`, `?task_id=`, `?limit=` |
+| `GET` | `/prs/<pr_id>` | PR record with status refreshed from Azure DevOps |
 
 ## Environment variables
 

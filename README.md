@@ -40,6 +40,8 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
 | `PATCH` | `/azure/pull-requests/<pr_id>` | Completar / abandonar / reactivar PR |
+| `GET` | `/prs` | Listar PRs registrados (`?repo=`, `?status=`, `?task_id=`, `?limit=`) |
+| `GET` | `/prs/<pr_id>` | PR con estado refrescado desde Azure DevOps |
 
 Scripts de referencia en `apis/`:
 
@@ -195,7 +197,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (100 tests)
+tests/                  — pytest (120 tests)
 arch/                   — diseño y plan de integración
 ```
 

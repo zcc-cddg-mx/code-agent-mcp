@@ -114,10 +114,12 @@ Estado actual: servicio funcional y verificado con detección automática de ram
   - Requiere obtener el `reviewer_id` del PAT configurado (via `GET /_apis/profile/profiles/me`)
   - Devuelve `{pr_id, reviewer_id, vote, pr_url}`
 
-- [ ] **Registro de PRs en SQLite** (`src/pr_store.py`, tabla `prs` separada de `tasks`):
+- [x] **Registro de PRs en SQLite** (`src/pr_store.py`, tabla `prs` separada de `tasks`):
   - Campos: `pr_id` (PK, Azure DevOps ID), `pr_url`, `repo`, `source_branch`, `target_branch`, `title`, `status`, `task_id` (nullable FK a tasks), `created_at`, `updated_at`
-  - Poblar desde `POST /azure/prepare-and-pr` y `POST /azure/pull-requests`
-  - Endpoints: `GET /prs` (con filtros `?repo=`, `?status=`, `?task_id=`), `GET /prs/<pr_id>` (con refresh de estado desde Azure DevOps)
+  - Poblar desde `POST /azure/prepare-and-pr`, `POST /azure/pull-requests` y `PATCH /azure/pull-requests/<pr_id>`
+  - `GET /prs` — lista con filtros `?repo=`, `?status=`, `?task_id=`, `?limit=`
+  - `GET /prs/<pr_id>` — registro con estado refrescado desde Azure DevOps
+  - 20 tests (unit store + endpoints)
 
 - [ ] **Step tracking en tareas** — campo `steps` (JSON) en tabla `tasks` para exponer progreso granular al orquestador/UI:
   ```json
