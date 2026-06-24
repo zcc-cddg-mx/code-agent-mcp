@@ -32,16 +32,17 @@ CREATE TABLE IF NOT EXISTS tasks (
     summary      TEXT,
     error        TEXT,
     active_task  TEXT,
+    steps        TEXT,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 )
 """
 
-_JSON_FIELDS = {"active_task"}
+_JSON_FIELDS = {"active_task", "steps"}
 _ALL_FIELDS = [
     "task_id", "ticket", "status", "command",
     "branch", "aux_branch", "commit_id", "repo",
-    "build_status", "summary", "error", "active_task",
+    "build_status", "summary", "error", "active_task", "steps",
     "created_at", "updated_at",
 ]
 
@@ -56,6 +57,10 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _lock, _connect() as conn:
         conn.execute(_CREATE_TABLE)
+        # Migration: add steps column if it doesn't exist (existing installs)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "steps" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN steps TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -70,30 +75,42 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 
 def upsert(task: dict, now_iso: str) -> None:
-    """Insert or update a task record."""
+    """Insert or update a task record.
+
+    Partial updates (without status) are supported for existing records — use
+    this for step-only updates. When inserting a new record, status is required.
+    """
     row = {f: task.get(f) for f in _ALL_FIELDS}
     row["task_id"] = task["task_id"]
-    row["status"] = task["status"]
     row["updated_at"] = now_iso
     if "created_at" not in task:
         row["created_at"] = now_iso
 
     for field in _JSON_FIELDS:
-        if isinstance(row.get(field), dict):
+        if isinstance(row.get(field), (dict, list)):
             row[field] = json.dumps(row[field])
 
-    cols = ", ".join(row.keys())
-    placeholders = ", ".join(f":{k}" for k in row.keys())
+    non_null = {k: v for k, v in row.items() if v is not None}
+
+    if "status" not in non_null:
+        # Partial update — record must already exist
+        sets = ", ".join(f"{k} = :{k}" for k in non_null if k not in ("task_id", "created_at"))
+        with _lock, _connect() as conn:
+            conn.execute(f"UPDATE tasks SET {sets} WHERE task_id = :task_id", non_null)
+        return
+
+    cols = ", ".join(non_null)
+    placeholders = ", ".join(f":{k}" for k in non_null)
     updates = ", ".join(
-        f"{k} = :{k}" for k in row.keys()
-        if k not in ("task_id", "created_at") and row[k] is not None
+        f"{k} = :{k}" for k in non_null
+        if k not in ("task_id", "created_at")
     )
     sql = (
         f"INSERT INTO tasks ({cols}) VALUES ({placeholders}) "
         f"ON CONFLICT(task_id) DO UPDATE SET {updates}"
     )
     with _lock, _connect() as conn:
-        conn.execute(sql, row)
+        conn.execute(sql, non_null)
 
 
 def get(task_id: str) -> dict | None:

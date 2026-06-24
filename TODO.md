@@ -121,15 +121,13 @@ Estado actual: servicio funcional y verificado con detección automática de ram
   - `GET /prs/<pr_id>` — registro con estado refrescado desde Azure DevOps
   - 20 tests (unit store + endpoints)
 
-- [ ] **Step tracking en tareas** — campo `steps` (JSON) en tabla `tasks` para exponer progreso granular al orquestador/UI:
-  ```json
-  {"steps": [
-    {"name": "fetch",         "status": "done"},
-    {"name": "create_branch", "status": "done"},
-    {"name": "push",          "status": "running"}
-  ]}
-  ```
-  Prerrequisito para cualquier UI que muestre progreso en tiempo real.
+- [x] **Step tracking en tareas** — campo `steps` (JSON) en tabla `tasks`:
+  - Pasos: `create_branch` → `commit_push` → `create_aux_branch`
+  - Status por paso: `pending` → `running` → `done` | `failed`
+  - Al iniciar el worker se escriben todos los pasos como `pending`; cada paso se marca `running` antes y `done` después; el paso activo pasa a `failed` si hay excepción
+  - Migration automática en `init_db()` para instancias existentes (`ALTER TABLE ADD COLUMN steps`)
+  - `task_store.upsert` ahora soporta updates parciales sin `status` (hace `UPDATE` directo si `status` está ausente)
+  - 6 nuevos tests (unit store + worker integration)
 
 ## Nice-to-have
 

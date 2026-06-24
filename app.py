@@ -99,6 +99,22 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_TASK_STEPS = ["create_branch", "commit_push", "create_aux_branch"]
+
+
+def _step(task_id: str, name: str, status: str) -> None:
+    """Persist a single step status update for a running task."""
+    record = task_store.get(task_id) or {}
+    steps: list = list(record.get("steps") or [])
+    for s in steps:
+        if s["name"] == name:
+            s["status"] = status
+            break
+    else:
+        steps.append({"name": name, "status": status})
+    task_store.upsert({"task_id": task_id, "steps": steps}, _now_iso())
+
+
 def _invert_roles(branch_roles: dict) -> dict:
     """Invert {branch: role} → {role: [branches]} for readable display."""
     result: dict[str, list] = {}
@@ -270,7 +286,11 @@ def run():
         from src.placer import create_feature_branch, git_add_commit_push, create_auxiliary_branch
 
         _current_task = {"task_id": task_id, "ticket": body["ticket"], "started_at": _now_iso()}
-        task_store.upsert({"task_id": task_id, "status": "running"}, _now_iso())
+        task_store.upsert({
+            "task_id": task_id,
+            "status": "running",
+            "steps": [{"name": s, "status": "pending"} for s in _TASK_STEPS],
+        }, _now_iso())
 
         try:
             repo_root = Path(body["repo"])
@@ -281,9 +301,17 @@ def run():
             ticket = body["ticket"]
             commit_msg = body["commit_message"]
 
+            _step(task_id, "create_branch", "running")
             create_feature_branch(repo_root, branch, base_branch)
+            _step(task_id, "create_branch", "done")
+
+            _step(task_id, "commit_push", "running")
             commit_id = git_add_commit_push(repo_root, file_paths, ticket, commit_msg, branch)
+            _step(task_id, "commit_push", "done")
+
+            _step(task_id, "create_aux_branch", "running")
             aux_branch = create_auxiliary_branch(repo_root, branch, target, file_paths, ticket, commit_msg)
+            _step(task_id, "create_aux_branch", "done")
 
             repo_name = repo_root.name
             task_store.upsert({
@@ -300,10 +328,18 @@ def run():
         except Exception as exc:
             traceback.print_exc()
             log("ERROR", f"task_id={task_id} failed: {exc}")
+            # Mark the currently-running step as failed
+            record = task_store.get(task_id) or {}
+            steps = list(record.get("steps") or [])
+            for s in steps:
+                if s["status"] == "running":
+                    s["status"] = "failed"
+                    break
             task_store.upsert({
                 "task_id": task_id,
                 "status": "error",
                 "error": str(exc),
+                "steps": steps,
             }, _now_iso())
         finally:
             _current_task = None

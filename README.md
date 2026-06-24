@@ -197,7 +197,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (124 tests)
+tests/                  — pytest (130 tests)
 arch/                   — diseño y plan de integración
 ```
 

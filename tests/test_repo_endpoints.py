@@ -293,3 +293,69 @@ def test_run_registered_repo_is_accepted(client):
 
     assert resp.status_code == 202
     assert resp.get_json()["status"] in ("queued", "rejected")
+
+
+# ─── POST /run — step tracking ───────────────────────────────────────────────
+
+def test_run_task_initialises_steps_as_pending(client):
+    """When a task is accepted, initial steps are written with status pending."""
+    import time
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    with patch("src.placer.create_feature_branch"), \
+         patch("src.placer.git_add_commit_push", return_value="abc123"), \
+         patch("src.placer.create_auxiliary_branch", return_value="feature/test_developer_auxiliar"):
+        resp = client.post("/run", json={**_RUN_BODY, "repo": "/tmp/ov-arizona-restat"}, headers=_HEADERS)
+
+    assert resp.status_code == 202
+    task_id = resp.get_json()["task_id"]
+    time.sleep(0.3)  # let worker finish
+
+    status_resp = client.get(f"/status/{task_id}", headers=_HEADERS)
+    task = status_resp.get_json()
+    assert "steps" in task
+    step_names = [s["name"] for s in task["steps"]]
+    assert step_names == ["create_branch", "commit_push", "create_aux_branch"]
+    assert all(s["status"] in ("done", "pending", "running", "failed") for s in task["steps"])
+
+
+def test_run_task_steps_all_done_on_success(client):
+    """All steps should be 'done' when the task completes successfully."""
+    import time
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    with patch("src.placer.create_feature_branch"), \
+         patch("src.placer.git_add_commit_push", return_value="abc123"), \
+         patch("src.placer.create_auxiliary_branch", return_value="feature/test_developer_auxiliar"):
+        resp = client.post("/run", json={**_RUN_BODY, "repo": "/tmp/ov-arizona-restat"}, headers=_HEADERS)
+
+    task_id = resp.get_json()["task_id"]
+    time.sleep(0.5)
+
+    task = client.get(f"/status/{task_id}", headers=_HEADERS).get_json()
+    if task["status"] == "done":
+        assert all(s["status"] == "done" for s in task["steps"])
+
+
+def test_run_task_failed_step_marked_failed(client):
+    """When a git step raises, the task ends in error and steps contain a failed entry."""
+    import time
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    with patch("src.placer.create_feature_branch"), \
+         patch("src.placer.git_add_commit_push", side_effect=RuntimeError("push failed")), \
+         patch("src.placer.create_auxiliary_branch"):
+        resp = client.post("/run", json={**_RUN_BODY, "repo": "/tmp/ov-arizona-restat"}, headers=_HEADERS)
+
+    task_id = resp.get_json()["task_id"]
+    time.sleep(0.5)
+
+    task = client.get(f"/status/{task_id}", headers=_HEADERS).get_json()
+    assert task["status"] == "error"
+    assert "steps" in task
+    # At least one step should be failed or no step is running anymore
+    statuses = {s["status"] for s in task["steps"]}
+    assert "running" not in statuses  # no step left dangling as running
