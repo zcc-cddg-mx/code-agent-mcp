@@ -282,3 +282,48 @@ def test_prepare_and_pr_auto_detect_fetch_error(client, tmp_path):
         resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
     assert resp.status_code == 502
     assert "git fetch failed" in resp.get_json()["error"]
+
+
+def test_prepare_and_pr_response_includes_base_branch(client, tmp_path):
+    detected = [tmp_path / "README.md"]
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.detect_base_branch", return_value="develop"), \
+         patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2564)):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREPARE_BODY_NO_FILES)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert "base_branch" in data
+    assert data["base_branch"] == "develop"
+
+
+def test_prepare_and_pr_auto_detects_base_from_repo_roles(client, tmp_path):
+    """When repo is registered with branch_roles, detect_base_branch is called with those candidates."""
+    detected = [tmp_path / "avisos.component.html"]
+    repo_record = {
+        "name": "my-repo",
+        "branch_roles": {"develop": "base", "test": "integration", "main": "integration"},
+    }
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.repo_store.get_by_name", return_value=repo_record), \
+         patch("src.placer.detect_base_branch", return_value="test") as mock_detect_base, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.ensure_auxiliary_branch", return_value=("fix/X_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2565)):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = dict(_PREPARE_BODY_NO_FILES)
+        body["repo_path"] = str(tmp_path)
+        resp = client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert data["base_branch"] == "test"
+    # base-role branches (develop) must come before integration in the candidates list
+    call_args = mock_detect_base.call_args
+    candidates = call_args[0][2]
+    assert candidates.index("develop") < candidates.index("test")

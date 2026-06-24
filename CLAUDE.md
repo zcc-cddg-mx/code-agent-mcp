@@ -97,6 +97,7 @@ Feature branches are cut from `develop` (not `developer`). Auxiliary branches ar
 - `create_auxiliary_branch(repo_root, feature_branch, target, files, ticket, commit_message)` — checks out from `origin/{target}`, cherry-picks files from the feature branch
 - `ensure_auxiliary_branch(repo_root, feature_branch, target, files, ticket, commit_message)` → `(aux_branch, action)` — idempotent: creates if absent, updates if files differ, skips if up to date; always cleans up local temporary branches
 - `detect_changed_files(repo_root, feature_branch, base_branch)` → `list[Path]` — returns absolute paths of files changed between `origin/{base_branch}` and `origin/{feature_branch}` via `git diff --name-only`; both branches must be fetched first; raises `RuntimeError` on git failure
+- `detect_base_branch(repo_root, feature_branch, candidates)` → `str` — picks the closest ancestor branch from `candidates` using `git merge-base` + `rev-list --count`; base-role branches should appear first in candidates to win ties; falls back to first candidate if merge-base fails for all
 
 ## Branch registry defaults and roles
 

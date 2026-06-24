@@ -89,6 +89,8 @@ El diccionario de ramas define cuáles son de integración y cuál es la base pa
 
 Si `files` no se envía, el agente detecta automáticamente los archivos cambiados usando `git diff --name-only origin/{base_branch}...origin/{branch}`.
 
+Si tampoco se envía `base_branch`, el agente lo infiere comparando el historial de la rama con todas las ramas registradas en el repo (primero las de rol `base`, luego `integration`) y eligiendo la ancestro más cercana via `git merge-base`.
+
 ```
 POST /azure/prepare-and-pr
 {
@@ -123,7 +125,7 @@ Respuesta:
 - `updated` — rama existía pero tenía archivos desactualizados; se aplicaron los cambios
 - `unchanged` — rama y PR ya existían; se devuelve el PR sin crear duplicado
 
-`files_detected` lista los archivos que se integraron (detectados automáticamente o pasados explícitamente).
+`base_branch` indica qué rama base se usó (inferida o explícita). `files_detected` lista los archivos que se integraron (detectados automáticamente o pasados explícitamente).
 
 ## Registro de repositorios y proyectos
 
@@ -162,7 +164,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (80 tests)
+tests/                  — pytest (86 tests)
 arch/                   — diseño y plan de integración
 ```
 

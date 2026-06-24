@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
-from src.placer import aux_branch_name, create_feature_branch, create_auxiliary_branch, git_add_commit_push, ensure_auxiliary_branch, detect_changed_files
+from src.placer import aux_branch_name, create_feature_branch, create_auxiliary_branch, git_add_commit_push, ensure_auxiliary_branch, detect_changed_files, detect_base_branch
 
 
 # ─── aux_branch_name ─────────────────────────────────────────────────────────
@@ -212,3 +212,75 @@ def test_detect_changed_files_git_error(tmp_path):
     with patch("src.placer.subprocess.run", return_value=mock_result):
         with pytest.raises(RuntimeError, match="git diff failed"):
             detect_changed_files(tmp_path, "feature/X", "develop")
+
+
+# ─── detect_base_branch ──────────────────────────────────────────────────────
+
+def _make_merge_base_side_effect(distances: dict[str, int | None]):
+    """
+    Return a subprocess.run side_effect where merge-base succeeds for branches in
+    `distances` (value = number of commits since branch point) and rev-list returns
+    that count. Pass None as the distance to simulate merge-base failure for that branch.
+
+    merge-base emits a unique fake hash per branch so rev-list can match it back.
+    """
+    # Map branch → fake merge-base hash so rev-list can identify which branch it's for
+    fake_hashes = {branch: f"deadbeef{i:04d}" for i, branch in enumerate(distances)}
+    hash_to_dist = {fake_hashes[b]: d for b, d in distances.items()}
+
+    def side_effect(cmd, **kwargs):
+        cmd_str = " ".join(str(c) for c in cmd)
+        m = MagicMock(returncode=0, stdout="", stderr="")
+
+        if "merge-base" in cmd_str:
+            for branch, dist in distances.items():
+                if f"origin/{branch}" in cmd_str:
+                    if dist is None:
+                        m.returncode = 1
+                    else:
+                        m.stdout = fake_hashes[branch]
+                    return m
+            m.returncode = 1
+            return m
+
+        if "rev-list" in cmd_str and "--count" in cmd_str:
+            for h, dist in hash_to_dist.items():
+                if h in cmd_str:
+                    m.stdout = str(dist)
+                    return m
+
+        return m
+
+    return side_effect
+
+
+def test_detect_base_branch_picks_closest(tmp_path):
+    # develop is 1 commit away, test is 50 → develop should win
+    se = _make_merge_base_side_effect({"develop": 1, "test": 50})
+    with patch("src.placer.subprocess.run", side_effect=se):
+        result = detect_base_branch(tmp_path, "feature/X", ["develop", "test"])
+    assert result == "develop"
+
+
+def test_detect_base_branch_base_role_wins_tie(tmp_path):
+    # Both at distance 5 — 'develop' (base role, listed first) should win
+    se = _make_merge_base_side_effect({"develop": 5, "test": 5})
+    with patch("src.placer.subprocess.run", side_effect=se):
+        result = detect_base_branch(tmp_path, "fix/X", ["develop", "test"])
+    assert result == "develop"
+
+
+def test_detect_base_branch_picks_integration_when_closer(tmp_path):
+    # fix cut from 'test' (distance 1), not from develop (distance 50)
+    se = _make_merge_base_side_effect({"develop": 50, "test": 1})
+    with patch("src.placer.subprocess.run", side_effect=se):
+        result = detect_base_branch(tmp_path, "fix/X", ["develop", "test"])
+    assert result == "test"
+
+
+def test_detect_base_branch_fallback_on_no_merge_base(tmp_path):
+    # All merge-base calls fail — should fall back to first candidate
+    se = _make_merge_base_side_effect({"develop": None, "test": None})
+    with patch("src.placer.subprocess.run", side_effect=se):
+        result = detect_base_branch(tmp_path, "feature/X", ["develop", "test"])
+    assert result == "develop"

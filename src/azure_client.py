@@ -206,6 +206,7 @@ def prepare_and_pr():
           properties:
             aux_branch:     {type: string}
             action:         {type: string, enum: [created, updated, unchanged]}
+            base_branch:    {type: string}
             files_detected: {type: array, items: {type: string}}
             pr:
               type: object
@@ -219,8 +220,9 @@ def prepare_and_pr():
     """
     import subprocess as _sp
     from pathlib import Path as _Path
-    from src.placer import ensure_auxiliary_branch, detect_changed_files
+    from src.placer import ensure_auxiliary_branch, detect_changed_files, detect_base_branch
     import src.branch_config as _bc
+    import src.repo_store as _rs
 
     body = request.get_json(silent=True) or {}
     required = ("repo", "repo_path", "branch", "target", "ticket", "title")
@@ -235,7 +237,6 @@ def prepare_and_pr():
     ticket: str = body["ticket"]
     title: str = body["title"]
     description: str = body.get("description", "")
-    base_branch: str = body.get("base_branch") or _bc.base_branch()
 
     raw_files = body.get("files")
     if raw_files is not None:
@@ -243,15 +244,45 @@ def prepare_and_pr():
             return jsonify({"error": "'files' must be a non-empty list"}), 400
         file_paths = [_Path(f) for f in raw_files]
         files_detected = [str(f) for f in file_paths]
+        base_branch: str = body.get("base_branch") or _bc.base_branch()
     else:
         r = str(repo_path.resolve())
+        # Fetch feature branch first; base candidates fetched below
         try:
             _sp.run(["git", "-C", r, "fetch", "origin", branch], check=True,
                     capture_output=True, text=True)
+        except _sp.CalledProcessError as exc:
+            return jsonify({"error": f"git fetch failed: {exc.stderr.strip()}"}), 502
+
+        # Determine base_branch: explicit > auto-detect from repo branch_roles > config default
+        if body.get("base_branch"):
+            base_branch = body["base_branch"]
+            candidates = [base_branch]
+        else:
+            repo_record = _rs.get_by_name(repo)
+            if repo_record and repo_record.get("branch_roles"):
+                roles = repo_record["branch_roles"]
+                # base-role branches first (prefer the canonical feature base), then integration
+                base_candidates = [b for b, role in roles.items() if role == "base"]
+                integ_candidates = [b for b, role in roles.items() if role == "integration"]
+                candidates = base_candidates + integ_candidates or [_bc.base_branch()]
+            else:
+                candidates = [_bc.base_branch()]
+
+            # Fetch all candidates so merge-base can be computed
+            for c in candidates:
+                _sp.run(["git", "-C", r, "fetch", "origin", c],
+                        capture_output=True, text=True)
+
+            base_branch = detect_base_branch(repo_path, branch, candidates)
+
+        # Ensure base_branch is fetched (covers explicit case too)
+        try:
             _sp.run(["git", "-C", r, "fetch", "origin", base_branch], check=True,
                     capture_output=True, text=True)
         except _sp.CalledProcessError as exc:
             return jsonify({"error": f"git fetch failed: {exc.stderr.strip()}"}), 502
+
         try:
             file_paths = detect_changed_files(repo_path, branch, base_branch)
         except RuntimeError as exc:
@@ -260,7 +291,7 @@ def prepare_and_pr():
             return jsonify({"error": "No changed files detected between "
                                      f"origin/{base_branch}...origin/{branch}"}), 400
         files_detected = [str(f) for f in file_paths]
-        log("AZURE", f"auto-detected {len(file_paths)} file(s): {files_detected}")
+        log("AZURE", f"base_branch='{base_branch}', auto-detected {len(file_paths)} file(s)")
 
     try:
         aux_branch, action = ensure_auxiliary_branch(
@@ -276,6 +307,7 @@ def prepare_and_pr():
         return jsonify({
             "aux_branch": aux_branch,
             "action": action,
+            "base_branch": base_branch,
             "files_detected": files_detected,
             "pr": existing_pr,
         }), 200
@@ -289,6 +321,7 @@ def prepare_and_pr():
     return jsonify({
         "aux_branch": aux_branch,
         "action": action,
+        "base_branch": base_branch,
         "files_detected": files_detected,
         "pr": pr,
     }), 201

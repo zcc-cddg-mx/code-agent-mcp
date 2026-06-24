@@ -42,6 +42,47 @@ def detect_changed_files(repo_root: Path, feature_branch: str, base_branch: str)
     return [abs_root / p for p in rel_paths]
 
 
+def detect_base_branch(repo_root: Path, feature_branch: str, candidates: list[str]) -> str:
+    """Return the most likely base branch for feature_branch from a list of candidates.
+
+    Uses git merge-base to find which candidate shares the most recent common ancestor
+    with feature_branch (i.e. fewest commits since the branch point). Candidates with
+    role 'base' should be placed first in the list so they win ties.
+
+    Both feature_branch and all candidates must already be fetched from origin.
+    Falls back to the first candidate if no merge-base can be computed for any.
+    """
+    r = str(Path(repo_root).resolve())
+    best_branch: str = candidates[0]
+    best_distance: int | None = None
+
+    for candidate in candidates:
+        mb = subprocess.run(
+            ["git", "-C", r, "merge-base",
+             f"origin/{candidate}", f"origin/{feature_branch}"],
+            capture_output=True, text=True,
+        )
+        if mb.returncode != 0 or not mb.stdout.strip():
+            continue
+        merge_base_commit = mb.stdout.strip()
+        # Count commits on feature_branch since the merge-base (lower = closer base)
+        rev = subprocess.run(
+            ["git", "-C", r, "rev-list", "--count",
+             f"{merge_base_commit}..origin/{feature_branch}"],
+            capture_output=True, text=True,
+        )
+        if rev.returncode != 0:
+            continue
+        distance = int(rev.stdout.strip())
+        if best_distance is None or distance < best_distance:
+            best_distance = distance
+            best_branch = candidate
+
+    log("GIT", f"detected base branch for '{feature_branch}': '{best_branch}' "
+        f"(distance={best_distance}, candidates={candidates})")
+    return best_branch
+
+
 def aux_branch_name(feature_branch: str, target: str) -> str:
     """Return the canonical auxiliary branch name for a given target.
 

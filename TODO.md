@@ -63,6 +63,13 @@ Estado actual: servicio funcional con registro de repos/proyectos, roles de rama
 - [x] Respuesta incluye `files_detected` — lista los archivos integrados (sean detectados o explícitos)
 - [x] Tests: `test_detect_changed_files_*` (3 tests) + `test_prepare_and_pr_auto_detect*` (3 tests)
 
+### Detección automática de rama base
+- [x] `src/placer.py` — `detect_base_branch(repo_root, feature_branch, candidates)`: `git merge-base` + `rev-list --count` para encontrar el ancestro más cercano
+- [x] `POST /azure/prepare-and-pr` — si no se pasa `base_branch`, consulta `branch_roles` del repo registrado para obtener candidatos (base-role primero, luego integration); llama `detect_base_branch`; fallback a `branch_config.base_branch()` si el repo no está registrado
+- [x] Respuesta incluye `base_branch` — permite al caller saber qué rama base se usó
+- [x] Tests: `test_detect_base_branch_*` (4 tests) + `test_prepare_and_pr_auto_detects_base_from_repo_roles`
+- [x] Probado: `fix/test_fix_mcp_jira` detecta `test` automáticamente (1 archivo) sin pasar `base_branch`
+
 ### Documentación y tooling
 - [x] Swagger UI via flasgger (`/apidocs/`)
 - [x] `run_local.sh` — arranque local sin Docker
