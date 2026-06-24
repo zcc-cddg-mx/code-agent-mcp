@@ -104,42 +104,29 @@ Flujo completo desde Claude Code:
 
 ---
 
-## Pendiente en `claude-mcp-jira` (Fase 11)
+## Integración en `claude-mcp-jira`
 
-### Nuevo módulo: `service/clients/code_agent_client.py`
+> La implementación del cliente y los MCP tools se gestiona desde el proyecto `claude-mcp-jira`
+> (`/home/idavid/dev/claude/claude-mcp-jira`). Este servicio está listo para ser consumido.
 
-Cliente HTTP hacia `code-agent-mcp`. Patrón idéntico a `jira_client.py`.
+### Contrato de API que expone este servicio
 
-Variables de entorno a añadir en `claude-mcp-jira`:
+Variables de entorno que necesita el caller:
 
 ```
-CODE_AGENT_URL=http://code-agent-mcp:5001   # URL del agente
-CODE_AGENT_TOKEN=                            # mismo valor que TOKEN_AZURE del agente
+CODE_AGENT_URL=http://localhost:5001   # URL del agente (5001 en local)
+CODE_AGENT_TOKEN=                      # mismo valor que TOKEN_AZURE del agente
 ```
 
-### MCP tools a añadir en `jira_mcp/server.py`
+### MCP tools que consume `claude-mcp-jira`
 
-| Tool | Endpoint que llama | Descripción |
+| Tool | Endpoint | Descripción |
 |---|---|---|
 | `run_code_agent` | `POST /run` | Retorna `task_id`; 403 si repo no registrado |
 | `get_code_agent_status` | `GET /status/<task_id>` | Estado + branch + commit_id + steps |
+| `preview_pull_request` | `POST /azure/prepare-and-pr/preview` | Dry-run: muestra rama base + archivos antes de crear (opcional) |
 | `create_azure_pull_request` | `POST /azure/prepare-and-pr` | Idempotente: ensure aux + find-or-create PR |
 | `get_pull_request_status` | `GET /azure/pull-requests/<pr_id>` | Estado PR + build CI |
-
-Opcional (pre-confirmación al usuario):
-| Tool | Endpoint que llama | Descripción |
-|---|---|---|
-| `preview_pull_request` | `POST /azure/prepare-and-pr/preview` | Dry-run: muestra rama base + archivos antes de crear |
-
-### Orden de implementación
-
-| Paso | Qué |
-|---|---|
-| 1 | `service/clients/code_agent_client.py` — funciones: `run_task`, `get_task_status`, `prepare_and_pr`, `get_pr_status` |
-| 2 | `jira_mcp/server.py` — añadir 4 tools al schema + dispatch |
-| 3 | `jira_mcp/service_client.py` — añadir 4 funciones que llaman al client |
-| 4 | `scripts/test-code-agent.sh` — e2e del flujo completo |
-| 5 | Actualizar CLAUDE.md, TODO, docs |
 
 ---
 

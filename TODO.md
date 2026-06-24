@@ -85,17 +85,11 @@ Estado actual: servicio funcional y verificado con detección automática de ram
 
 ---
 
-## Futura implementación — `claude-mcp-jira`
+## Integración con `claude-mcp-jira`
 
-> Pendiente hasta terminar verificación funcional de este agente.
-
-- [ ] `service/clients/code_agent_client.py` — HTTP client para los endpoints del agente
-- [ ] MCP tools:
-  - [ ] `run_code_agent` — llama `POST /run`, retorna `task_id`
-  - [ ] `get_code_agent_status` — llama `GET /status/<task_id>`
-  - [ ] `create_azure_pull_request` — llama `POST /azure/pull-requests`
-  - [ ] `get_pull_request_status` — llama `GET /azure/pull-requests/<pr_id>`
-- [ ] e2e test del flujo completo (ver `arch/integration-plan.md`)
+> Este servicio está listo. La implementación del cliente HTTP y los MCP tools
+> se gestiona desde `/home/idavid/dev/claude/claude-mcp-jira`.
+> Contrato de API documentado en `arch/integration-plan.md`.
 
 ---
 
