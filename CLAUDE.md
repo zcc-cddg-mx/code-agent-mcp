@@ -109,8 +109,8 @@ Feature branches are cut from `develop` (not `developer`). Auxiliary branches ar
 |---|---|---|---|
 | `developer` | desarrollo | `integration` | DEV-UAT |
 | `test` | pruebas | `integration` | Preprod |
-| `develop` | producción-pre | `base` | **cut features from here** (`is_base=True`) |
-| `main` | producción-desplegado | `integration` | production |
+| `develop` | producción | `base` | **cut features from here** (`is_base=True`); PR target for prod |
+| `main` | producción (desplegado) | `integration` | DevOps integrates develop→main manually |
 
 ### Per-repo branch roles
 

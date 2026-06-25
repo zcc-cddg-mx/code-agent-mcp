@@ -81,7 +81,7 @@ El diccionario de ramas persiste en SQLite (misma DB que `TASKS_DB`) y sobrevive
 |---|---|---|
 | `developer` | desarrollo | integración DEV-UAT |
 | `test` | pruebas | integración Preprod |
-| `develop` | producción-pre | **base para features** |
+| `develop` | producción | **base para features** + destino de PR a producción |
 | `main` | producción | producción desplegada |
 
 ## Preview de cambios (dry-run)

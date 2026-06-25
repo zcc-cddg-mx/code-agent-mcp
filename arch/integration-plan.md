@@ -69,10 +69,10 @@ Basado en el README de `ov-arizona-backend-ecuador`:
 
 | Rama | Label | Rol | `is_base` |
 |---|---|---|---|
-| `develop` | producción-pre | `base` | ✅ feature branches se cortan desde aquí |
+| `develop` | producción | `base` | ✅ features se cortan desde aquí; destino de PR a producción |
 | `developer` | desarrollo | `integration` | — DEV/UAT |
 | `test` | pruebas | `integration` | — Preprod |
-| `main` | producción-desplegado | `integration` | — Producción |
+| `main` | producción (desplegado) | `integration` | DevOps integra develop→main manualmente |
 
 ### Seguridad
 

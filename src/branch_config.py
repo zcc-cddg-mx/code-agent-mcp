@@ -39,8 +39,8 @@ _DEFAULTS: dict[str, dict] = {
         "role":        "integration",
     },
     "develop": {
-        "label":       "producción (pre)",
-        "environment": None,
+        "label":       "producción",
+        "environment": "Producción (pre-deploy)",
         "url":         None,
         "is_base":     True,
         "role":        "base",
