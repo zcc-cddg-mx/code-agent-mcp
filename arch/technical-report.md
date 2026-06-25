@@ -1,8 +1,8 @@
 # Reporte Técnico — code-agent-mcp
 
-**Versión:** 1.2  
-**Fecha:** 2026-06-24  
-**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 133 tests.
+**Versión:** 1.3  
+**Fecha:** 2026-06-25  
+**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 141 tests.
 
 ---
 
@@ -53,7 +53,7 @@ app.py                  — Flask entry point; todos los endpoints; async task p
 src/
   auth.py               — middleware X-Agent-Token → 401
   task_store.py         — SQLite: tabla tasks (async task pattern + step tracking)
-  repo_store.py         — SQLite: tabla repos (incluyendo branch_roles JSON)
+  repo_store.py         — SQLite: tabla repos (branch_roles JSON, local_path)
   project_store.py      — SQLite: tabla projects (slug {org}/{name})
   branch_config.py      — diccionario de ramas persistido en SQLite; hot-reload; campo role por rama
   pr_store.py           — SQLite: tabla prs; poblada desde prepare-and-pr y pull-requests
@@ -63,7 +63,7 @@ src/
   azure_client.py       — Azure DevOps REST API: _create_pr, _find_existing_pr, blueprints
   logger.py             — log estructurado con prefijo [MÓDULO]
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (133 tests)
+tests/                  — pytest (141 tests)
 arch/                   — diseño y documentación técnica
 ```
 
@@ -103,21 +103,20 @@ Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` e
 
 Encapsula el flujo completo de rama auxiliar y PR en una sola llamada idempotente.
 
-**Request (campos `files` y `base_branch` opcionales):**
+**Request — campos requeridos:** `repo`, `branch`, `target`, `ticket`, `title`  
+**Campos opcionales:** `repo_path`, `files`, `base_branch`, `description`
+
 ```json
 {
   "repo":        "ov-arizona-backend-ecuador",
-  "repo_path":   "/ruta/local/al/clon/del/repo",
   "branch":      "feature/ZNRX_67108_renov_agosto",
   "target":      "test",
   "ticket":      "ZNRX-67108",
-  "title":       "ZNRX-67108 Renovaciones agosto → test",
-  "files":       ["/ruta/local/al/repo/src/File.java"],
-  "base_branch": "develop",
-  "description": "Generado automáticamente por claude-mcp-jira"
+  "title":       "ZNRX-67108 Renovaciones agosto → test"
 }
 ```
 
+`repo_path` es opcional si el repo fue registrado con `local_path` — se resuelve automáticamente desde el registry. Si se pasa en el body, toma precedencia (backward compatible).  
 Si `files` se omite: auto-detectado via `git diff --name-only origin/{base_branch}...origin/{branch}`.  
 Si `base_branch` se omite: inferido via `git merge-base` comparando con los candidatos del repo registrado (base-role primero, luego integration).
 
@@ -262,7 +261,7 @@ repo, build_status, summary, error, steps (JSON), created_at, updated_at
 ```
 repo_id, name, git_url, org, project, project_id, azure_repo_id,
 default_branch, web_url, branches (JSON), known_branches (JSON),
-branch_roles (JSON), size_kb, created_at, updated_at
+branch_roles (JSON), local_path, size_kb, created_at, updated_at
 ```
 
 **`projects`** — proyectos Azure DevOps (deduplicados por slug)
@@ -293,6 +292,7 @@ El registro de repos en SQLite actúa como allowlist definido por el usuario. `P
 ```bash
 sqlite3 /tmp/code-agent-mcp.db \
   "ALTER TABLE repos ADD COLUMN branch_roles TEXT;
+   ALTER TABLE repos ADD COLUMN local_path TEXT;
    ALTER TABLE tasks ADD COLUMN steps TEXT;"
 ```
 
@@ -331,7 +331,7 @@ sqlite3 /tmp/code-agent-mcp.db \
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/                             # suite completa (133 tests)
+pytest tests/                             # suite completa (141 tests)
 pytest tests/test_placer.py -v            # git operations + detección automática
 pytest tests/test_azure_client.py -v      # Azure DevOps API + registry validation
 pytest tests/test_repo_inspector.py -v    # repo inspection + role assignment
@@ -348,11 +348,12 @@ Todos los tests mockean subprocess y requests — no requieren conexión a Azure
 
 | Prioridad | Ítem |
 |---|---|
-| Alta | Cliente HTTP en `claude-mcp-jira` + MCP tools (`run_code_agent`, `get_code_agent_status`, `create_azure_pull_request`, `get_pull_request_status`) |
+| Alta | Cliente HTTP en `claude-mcp-jira` + MCP tools (`run_code_agent`, `get_code_agent_status`, `create_azure_pull_request`, `get_pull_request_status`) — implementación gestionada desde ese proyecto |
 | Baja | `docker-compose.yml` para desarrollo conjunto con `claude-mcp-jira` |
 | Baja | Paginación en `GET /tasks` |
 | Baja | UI para editar diccionario de ramas |
 | Futura | Votos en PRs (`PUT /azure/pull-requests/<pr_id>/vote` — approve/reject/abstain/reset) |
+| Futura | Administración remota de repos (modo volumen: `POST /repos {clone:true}` auto-clona en `/data/repos/{name}`; modo API: reemplazar subprocess con Azure DevOps REST — ver `TODO.md`) |
 
 ---
 

@@ -10,9 +10,9 @@ genérica del code-agent original y descartando toda lógica específica del dom
 
 ---
 
-## Estado actual del `code-agent-mcp` (2026-06-24)
+## Estado actual del `code-agent-mcp` (2026-06-25)
 
-**133 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
+**141 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
 
 ### Módulos implementados
 
@@ -21,7 +21,7 @@ genérica del code-agent original y descartando toda lógica específica del dom
 | `app.py` | Flask HTTP API, todos los endpoints, Swagger UI (`/apidocs/`) |
 | `src/auth.py` | `X-Agent-Token` header → 401 si falta/incorrecto; `/health` es el único endpoint libre |
 | `src/task_store.py` | SQLite: tabla `tasks` (patrón async 202 + polling); campo `steps` (JSON) para step tracking |
-| `src/repo_store.py` | SQLite: tabla `repos` con columna `branch_roles` (JSON) |
+| `src/repo_store.py` | SQLite: tabla `repos` con columnas `branch_roles` (JSON) y `local_path` (TEXT) |
 | `src/project_store.py` | SQLite: tabla `projects` (slug `{org}/{name}`); auto-upsert al registrar repo |
 | `src/branch_config.py` | Diccionario de ramas persistido en SQLite (tabla `branch_config`); hot-reload; defaults del README de `ov-arizona-backend-ecuador` |
 | `src/pr_store.py` | SQLite: tabla `prs`; poblada desde `prepare-and-pr`, `pull-requests` y `PATCH pull-requests/<id>` |
@@ -48,8 +48,8 @@ genérica del code-agent original y descartando toda lógica específica del dom
 | `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama (sin re-inspeccionar) |
 | `GET` | `/projects` | Listar proyectos con sus repos |
 | `GET` | `/projects/<org>/<name>` | Proyecto por slug |
-| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada; devuelve `existing_pr` |
-| `POST` | `/azure/prepare-and-pr` | Idempotente: ensure aux branch + find-or-create PR aux ← **endpoint principal** |
+| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada; devuelve `existing_pr`; `repo_path` opcional si `local_path` en registry |
+| `POST` | `/azure/prepare-and-pr` | Idempotente: ensure aux branch + find-or-create PR aux ← **endpoint principal**; `repo_path` opcional si `local_path` en registry |
 | `POST` | `/azure/pull-requests` | Crear feature PR + aux PR simultáneos (legacy) |
 | `GET` | `/azure/pull-requests/<pr_id>` | Estado del PR + build CI |
 | `PATCH` | `/azure/pull-requests/<pr_id>` | Completar / abandonar / reactivar PR |

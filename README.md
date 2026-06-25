@@ -117,8 +117,10 @@ Respuesta:
 
 `POST /azure/prepare-and-pr` es el endpoint principal para crear PRs. Es idempotente: se puede llamar varias veces con los mismos datos sin efectos secundarios.
 
-**Campos requeridos:** `repo`, `repo_path`, `branch`, `target`, `ticket`, `title`
-**Campos opcionales:** `files`, `base_branch`, `description`
+**Campos requeridos:** `repo`, `branch`, `target`, `ticket`, `title`
+**Campos opcionales:** `repo_path`, `files`, `base_branch`, `description`
+
+`repo_path` es opcional si el repo fue registrado con `local_path` — el agente lo resuelve desde el registry. Si se pasa en el body, toma precedencia.
 
 Si `files` no se envía, el agente detecta automáticamente los archivos cambiados usando `git diff --name-only origin/{base_branch}...origin/{branch}`.
 
@@ -127,12 +129,11 @@ Si tampoco se envía `base_branch`, el agente lo infiere comparando el historial
 ```
 POST /azure/prepare-and-pr
 {
-  "repo":       "ov-arizona-backend-ecuador",
-  "repo_path":  "/ruta/local/al/repo",
-  "branch":     "feature/ZNRX_67108_renov_agosto",
-  "target":     "test",
-  "ticket":     "ZNRX-67108",
-  "title":      "ZNRX-67108 Renovaciones agosto → test"
+  "repo":    "ov-arizona-backend-ecuador",
+  "branch":  "feature/ZNRX_67108_renov_agosto",
+  "target":  "test",
+  "ticket":  "ZNRX-67108",
+  "title":   "ZNRX-67108 Renovaciones agosto → test"
 }
 ```
 
@@ -170,6 +171,16 @@ Al registrar un repositorio, el servicio:
 5. Auto-asigna un **rol** a cada rama: `base`, `integration`, `feature`, u `other`
 6. Persiste repo y proyecto en SQLite (tabla `repos` + tabla `projects`)
 
+El campo `local_path` es opcional en `POST /repos`. Si se provee, queda almacenado en el registro y los endpoints de `prepare-and-pr` y `preview` lo usan automáticamente sin necesitar `repo_path` en cada request.
+
+```json
+POST /repos
+{
+  "git_url":    "https://dev.azure.com/Org/Project/_git/repo-name",
+  "local_path": "/ruta/local/al/clon"
+}
+```
+
 Los roles se almacenan por repo en `branch_roles` y se pueden corregir con `PATCH /repos/<name>/branches/<branch>`. La respuesta de `GET /repos/<name>` incluye además `branches_by_role` (inverso computado):
 
 ```json
@@ -189,7 +200,7 @@ run_local.sh            — script de arranque para desarrollo local
 src/
   auth.py               — X-Agent-Token header validation → 401
   task_store.py         — SQLite: tabla tasks (async task pattern)
-  repo_store.py         — SQLite: tabla repos
+  repo_store.py         — SQLite: tabla repos (incluye local_path)
   project_store.py      — SQLite: tabla projects
   branch_config.py      — diccionario de ramas persistido en SQLite (tabla branch_config)
   repo_inspector.py     — parsea URLs Azure DevOps, git ls-remote, clasifica ramas
@@ -197,7 +208,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (133 tests, 2026-06-24)
+tests/                  — pytest (141 tests, 2026-06-25)
 arch/                   — diseño y plan de integración
 ```
 

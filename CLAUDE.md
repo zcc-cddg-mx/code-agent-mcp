@@ -12,7 +12,7 @@ The full design is in `arch/integration-plan.md`. Read it before starting any im
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/          # 133 tests
+pytest tests/          # 141 tests
 ./run_local.sh         # starts server on port 5001, reads .env.local
 ```
 
@@ -59,7 +59,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `POST` | `/run` | Enqueue git task → 202 |
 | `GET` | `/status/<task_id>` | Poll task result |
 | `GET` | `/tasks` | Recent tasks; `?ticket=` filter, `?limit=` |
-| `POST` | `/repos` | Register repo + immediate inspection |
+| `POST` | `/repos` | Register repo + immediate inspection; optional `local_path` stored for git ops |
 | `GET` | `/repos` | List all repos |
 | `GET` | `/repos/<name>` | Get repo by name |
 | `POST` | `/repos/<name>/refresh` | Re-inspect repo |
@@ -123,7 +123,7 @@ Feature branches are cut from `develop` (not `developer`). Auxiliary branches ar
 `GET /repos/<name>` returns `branch_roles` (persisted) plus `branches_by_role` (computed inverse, not persisted).
 `PATCH /repos/<name>/branches/<branch>` lets callers override a single branch role without re-inspecting.
 
-**DB migration for existing installs:** `sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT; ALTER TABLE tasks ADD COLUMN steps TEXT;"`
+**DB migration for existing installs:** `sqlite3 /tmp/code-agent-mcp.db "ALTER TABLE repos ADD COLUMN branch_roles TEXT; ALTER TABLE repos ADD COLUMN local_path TEXT; ALTER TABLE tasks ADD COLUMN steps TEXT;"`
 
 ## Key constraints
 
