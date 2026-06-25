@@ -491,6 +491,10 @@ def register_repo():
             git_url:
               type: string
               example: "https://ZurichInsurance-EC@dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat"
+            local_path:
+              type: string
+              description: Absolute path to the local clone on this server. Optional — stored in registry and used by prepare-and-pr when repo_path is not in the request body.
+              example: /home/idavid/dev/ov/ov-arizona-backend-ecuador
     responses:
       201:
         description: Repository and project registered
@@ -542,8 +546,10 @@ def register_repo():
     project_store.upsert(result["project"], now)
     log("REPO", f"project '{result['project']['project_id']}' registered/updated")
 
+    local_path = (body.get("local_path") or "").strip() or None
     repo_id = str(_uuid.uuid4())[:8]
-    record = {"repo_id": repo_id, "last_inspected_at": now, "created_at": now, **result["repo"]}
+    record = {"repo_id": repo_id, "last_inspected_at": now, "created_at": now,
+              "local_path": local_path, **result["repo"]}
     repo_store.upsert(record, now)
     log("REPO", f"registered '{repo_name}' (id={repo_id})")
     return jsonify({

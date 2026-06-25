@@ -17,8 +17,11 @@ case "${1:-list}" in
 
   register)
     GIT_URL="${GIT_URL:?set GIT_URL env var}"
-    curl -s -X POST "$BASE/repos" "${H[@]}" \
-      -d "{\"git_url\": \"$GIT_URL\"}" | python3 -m json.tool
+    LOCAL_PATH="${LOCAL_PATH:-}"
+    BODY="{\"git_url\": \"$GIT_URL\""
+    [ -n "$LOCAL_PATH" ] && BODY="$BODY, \"local_path\": \"$LOCAL_PATH\""
+    BODY="$BODY}"
+    curl -s -X POST "$BASE/repos" "${H[@]}" -d "$BODY" | python3 -m json.tool
     ;;
 
   list)

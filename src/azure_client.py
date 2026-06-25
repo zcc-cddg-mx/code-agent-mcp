@@ -149,6 +149,19 @@ def _check_repo_registered(repo_name: str):
     return record, None
 
 
+def _resolve_repo_path(body: dict, repo_record: dict) -> _Path:
+    """Return repo_path from request body, falling back to local_path in registry."""
+    raw = (body.get("repo_path") or "").strip()
+    if raw:
+        return _Path(raw)
+    local = repo_record.get("local_path")
+    if local:
+        return _Path(local)
+    raise ValueError(
+        "repo_path is required (or register the repo with local_path via POST /repos)"
+    )
+
+
 def _resolve_base_and_files(
     body: dict,
     repo_path: _Path,
@@ -308,17 +321,21 @@ def prepare_and_pr_preview():
     from src.placer import aux_branch_name
 
     body = request.get_json(silent=True) or {}
-    required = ("repo", "repo_path", "branch", "target")
+    required = ("repo", "branch", "target")
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
 
     repo: str = body["repo"]
-    _, err = _check_repo_registered(repo)
+    repo_record, err = _check_repo_registered(repo)
     if err:
         return err
 
-    repo_path = _Path(body["repo_path"])
+    try:
+        repo_path = _resolve_repo_path(body, repo_record)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     branch: str = body["branch"]
     target: str = body["target"]
 
@@ -417,17 +434,20 @@ def prepare_and_pr():
     from src.placer import ensure_auxiliary_branch
 
     body = request.get_json(silent=True) or {}
-    required = ("repo", "repo_path", "branch", "target", "ticket", "title")
+    required = ("repo", "branch", "target", "ticket", "title")
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
 
     repo: str = body["repo"]
-    _, err = _check_repo_registered(repo)
+    repo_record, err = _check_repo_registered(repo)
     if err:
         return err
 
-    repo_path = _Path(body["repo_path"])
+    try:
+        repo_path = _resolve_repo_path(body, repo_record)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     branch: str = body["branch"]
     target: str = body["target"]
     ticket: str = body["ticket"]

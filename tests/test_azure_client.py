@@ -9,6 +9,7 @@ _REGISTERED_REPO = {
     "name": "my-repo",
     "git_url": "https://dev.azure.com/MyOrg/MyProject/_git/my-repo",
     "branch_roles": {"develop": "base", "test": "integration", "developer": "integration"},
+    "local_path": "/tmp/fake-repo",
 }
 
 
@@ -550,3 +551,84 @@ def test_preview_repo_not_registered(client, tmp_path):
         resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
     assert resp.status_code == 403
     assert "not registered" in resp.get_json()["error"]
+
+
+# ─── local_path from registry ────────────────────────────────────────────────
+
+_PREPARE_BODY_NO_PATH = {
+    "repo":   "my-repo",
+    "branch": "feature/test_mcp_server",
+    "files":  ["/tmp/fake-repo/README.md"],
+    "target": "test",
+    "ticket": "test_mcp",
+    "title":  "test_mcp → test",
+}
+
+_PREVIEW_BODY_NO_PATH = {
+    "repo":   "my-repo",
+    "branch": "feature/test_mcp_server",
+    "files":  ["/tmp/fake-repo/README.md"],
+    "target": "test",
+}
+
+
+def test_prepare_and_pr_uses_local_path_from_registry(client):
+    """repo_path absent in body → resolved from registry local_path."""
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")), \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2561)):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY_NO_PATH, headers=_HEADERS)
+    assert resp.status_code == 201
+    assert resp.get_json()["pr"]["pr_id"] == 2561
+
+
+def test_prepare_and_pr_explicit_repo_path_overrides_registry(client):
+    """Explicit repo_path in body takes precedence over registry local_path."""
+    with patch("src.placer.ensure_auxiliary_branch", return_value=("feature/test_mcp_server_test_auxiliar", "created")) as mock_ensure, \
+         patch("src.azure_client._find_existing_pr", return_value=None), \
+         patch("src.azure_client.requests.post", return_value=_mock_post_response(2562)):
+        body = {**_PREPARE_BODY_NO_PATH, "repo_path": "/custom/path"}
+        client.post("/azure/prepare-and-pr", json=body, headers=_HEADERS)
+    call_repo_path = mock_ensure.call_args[0][0]
+    from pathlib import Path
+    assert Path(call_repo_path) == Path("/custom/path")
+
+
+def test_prepare_and_pr_no_repo_path_no_local_path_returns_400(client):
+    """Neither repo_path in body nor local_path in registry → 400."""
+    repo_no_local = {k: v for k, v in _REGISTERED_REPO.items() if k != "local_path"}
+    with patch("src.repo_store.get_by_name", return_value=repo_no_local):
+        resp = client.post("/azure/prepare-and-pr", json=_PREPARE_BODY_NO_PATH, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "repo_path" in resp.get_json()["error"]
+
+
+def test_preview_uses_local_path_from_registry(client):
+    """preview: repo_path absent in body → resolved from registry local_path."""
+    existing = {"pr_id": 2560, "pr_url": "https://dev.azure.com/.../pullrequest/2560"}
+    with patch("src.azure_client._find_existing_pr", return_value=existing):
+        resp = client.post("/azure/prepare-and-pr/preview", json=_PREVIEW_BODY_NO_PATH, headers=_HEADERS)
+    assert resp.status_code == 200
+    assert resp.get_json()["existing_pr"]["pr_id"] == 2560
+
+
+def test_preview_explicit_repo_path_overrides_registry(client, tmp_path):
+    """preview: explicit repo_path takes precedence over registry local_path."""
+    detected = [tmp_path / "file.ts"]
+    with patch("subprocess.run") as mock_sp, \
+         patch("src.placer.detect_changed_files", return_value=detected), \
+         patch("src.placer.detect_base_branch", return_value="develop"), \
+         patch("src.azure_client._find_existing_pr", return_value=None):
+        mock_sp.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        body = {**_PREVIEW_BODY_NO_PATH, "repo_path": str(tmp_path)}
+        resp = client.post("/azure/prepare-and-pr/preview", json=body, headers=_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_preview_no_repo_path_no_local_path_returns_400(client):
+    """preview: neither repo_path in body nor local_path in registry → 400."""
+    repo_no_local = {k: v for k, v in _REGISTERED_REPO.items() if k != "local_path"}
+    with patch("src.repo_store.get_by_name", return_value=repo_no_local):
+        resp = client.post("/azure/prepare-and-pr/preview", json=_PREVIEW_BODY_NO_PATH, headers=_HEADERS)
+    assert resp.status_code == 400
+    assert "repo_path" in resp.get_json()["error"]

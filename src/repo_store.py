@@ -14,7 +14,6 @@ from pathlib import Path
 
 from src.logger import log
 
-_DB_PATH = Path(os.environ.get("TASKS_DB", "/data/tasks.db"))
 _lock = threading.Lock()
 
 _CREATE_TABLE = """
@@ -32,6 +31,7 @@ CREATE TABLE IF NOT EXISTS repos (
     known_branches    TEXT,
     branch_roles      TEXT,
     size_kb           INTEGER,
+    local_path        TEXT,
     last_inspected_at TEXT,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
@@ -43,13 +43,14 @@ _ALL_FIELDS = [
     "repo_id", "name", "git_url", "org", "project", "project_id",
     "azure_repo_id", "default_branch", "web_url",
     "branches", "known_branches", "branch_roles", "size_kb",
-    "last_inspected_at", "created_at", "updated_at",
+    "local_path", "last_inspected_at", "created_at", "updated_at",
 ]
 
 
 def _connect() -> sqlite3.Connection:
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+    db_path = Path(os.environ.get("TASKS_DB", "/data/tasks.db"))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -57,6 +58,9 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _lock, _connect() as conn:
         conn.execute(_CREATE_TABLE)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(repos)")}
+        if "local_path" not in cols:
+            conn.execute("ALTER TABLE repos ADD COLUMN local_path TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

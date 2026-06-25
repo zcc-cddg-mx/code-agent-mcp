@@ -359,3 +359,27 @@ def test_run_task_failed_step_marked_failed(client):
     # At least one step should be failed or no step is running anymore
     statuses = {s["status"] for s in task["steps"]}
     assert "running" not in statuses  # no step left dangling as running
+
+
+# ─── local_path ──────────────────────────────────────────────────────────────
+
+def test_register_repo_with_local_path(client):
+    """local_path is persisted and returned in GET /repos/<name>."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        resp = client.post("/repos", json={
+            "git_url":    _URL_OV_RESTAT,
+            "local_path": "/home/user/dev/ov-arizona-restat",
+        }, headers=_HEADERS)
+    assert resp.status_code == 201
+    assert resp.get_json()["repo"]["local_path"] == "/home/user/dev/ov-arizona-restat"
+
+    get_resp = client.get("/repos/ov-arizona-restat", headers=_HEADERS)
+    assert get_resp.get_json()["local_path"] == "/home/user/dev/ov-arizona-restat"
+
+
+def test_register_repo_without_local_path(client):
+    """local_path absent from body → field not present in response."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        resp = client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+    assert resp.status_code == 201
+    assert "local_path" not in resp.get_json()["repo"]
