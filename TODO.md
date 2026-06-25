@@ -130,3 +130,28 @@ Estado actual: servicio funcional y verificado con detección automática de ram
   - Azure DevOps API: `PUT /_apis/git/repositories/{repo}/pullrequests/{pr_id}/reviewers/{reviewer_id}` (vote: 10=approve, -10=reject, 0=reset)
   - Requiere obtener el `reviewer_id` del PAT via `GET /_apis/profile/profiles/me`
 - [ ] Rate limiting en `POST /run` y `POST /azure/prepare-and-pr` (por token o por repo)
+
+- **Administración de repos en modo remoto (sin clones locales)** — para despliegue en contenedores:
+
+  **Contexto:** el servicio actual requiere clones locales (`local_path`) para operaciones git. En producción con Docker, cada repo necesita un volumen montado en el contenedor. La UI podría orquestar el montaje de volúmenes al registrar un repo, o eliminar la dependencia del clone completamente.
+
+  **Dos enfoques posibles (no excluyentes):**
+
+  1. **Modo volumen** — mantiene la implementación actual (`subprocess` + git CLI):
+     - Al registrar un repo, el sistema clona automáticamente en un directorio gestionado (ej. `/data/repos/{name}`)
+     - `POST /repos` acepta `clone: true` — clona en el servidor si no hay `local_path`
+     - La UI expone el path del volumen al usuario para que lo monte en `docker-compose.yml` o la capa de orchestración
+     - El borrado de repo (`DELETE /repos`) limpia el clone local opcionalmente
+     - **Ventaja:** cero cambios en `placer.py`; sigue funcionando con git CLI
+
+  2. **Modo API remota** — reemplaza `subprocess` por llamadas Azure DevOps REST:
+     - `detect_changed_files` → `GET /_apis/git/repositories/{repo}/diffs/commits`
+     - `git show origin/{branch}:{file}` → `GET /_apis/git/repositories/{repo}/items?path={f}&version={branch}`
+     - `git checkout + push` → `POST /_apis/git/repositories/{repo}/pushes`
+     - `detect_base_branch` → aproximado via `GET /_apis/git/repositories/{repo}/commits` (sin `merge-base` nativo)
+     - **Ventaja:** stateless — sin disco, sin volúmenes, deployable como función serverless
+     - **Desventaja:** reescritura significativa de `placer.py`; latencia y rate limiting Azure
+
+  **Recomendación de evolución:**
+  - v1 (corto plazo): modo volumen con auto-clone — sin cambios en `placer.py`, la UI gestiona el ciclo de vida del volumen
+  - v2 (largo plazo): modo API remota para repos de solo lectura (detect/preview); mantener modo volumen para writes (push)
