@@ -656,6 +656,54 @@ def set_branch_role(repo_name: str, branch_name: str):
     return jsonify(updated)
 
 
+@app.patch("/repos/<repo_name>/branch-map")
+@require_token
+def set_repo_branch_map(repo_name: str):
+    """Set the target→branch mapping for a repo (overrides global branch_config resolution).
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ov-arizona-backend-ecuador
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          description: "Mapping of logical target name → real branch name"
+          example:
+            developer: developer
+            test: test
+            prod: develop
+    responses:
+      200:
+        description: Updated repo record with branch_map
+        schema: {type: object}
+      400:
+        description: Body must be a non-empty JSON object
+      404:
+        description: Repository not found
+    """
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not body:
+        return jsonify({"error": "Body must be a non-empty JSON object mapping target→branch"}), 400
+
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+
+    now = _now_iso()
+    repo_store.set_branch_map(repo["repo_id"], body, now)
+    log("REPO", f"'{repo_name}' branch_map updated: {body}")
+
+    updated = repo_store.get(repo["repo_id"])
+    updated["branches_by_role"] = _invert_roles(updated.get("branch_roles") or {})
+    return jsonify(updated)
+
+
 @app.post("/repos/<repo_name>/refresh")
 @require_token
 def refresh_repo(repo_name: str):

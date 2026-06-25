@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS repos (
     branches          TEXT,
     known_branches    TEXT,
     branch_roles      TEXT,
+    branch_map        TEXT,
     size_kb           INTEGER,
     local_path        TEXT,
     last_inspected_at TEXT,
@@ -38,11 +39,11 @@ CREATE TABLE IF NOT EXISTS repos (
 )
 """
 
-_JSON_FIELDS = {"branches", "known_branches", "branch_roles"}
+_JSON_FIELDS = {"branches", "known_branches", "branch_roles", "branch_map"}
 _ALL_FIELDS = [
     "repo_id", "name", "git_url", "org", "project", "project_id",
     "azure_repo_id", "default_branch", "web_url",
-    "branches", "known_branches", "branch_roles", "size_kb",
+    "branches", "known_branches", "branch_roles", "branch_map", "size_kb",
     "local_path", "last_inspected_at", "created_at", "updated_at",
 ]
 
@@ -61,6 +62,8 @@ def init_db() -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(repos)")}
         if "local_path" not in cols:
             conn.execute("ALTER TABLE repos ADD COLUMN local_path TEXT")
+        if "branch_map" not in cols:
+            conn.execute("ALTER TABLE repos ADD COLUMN branch_map TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -141,6 +144,15 @@ def set_branch_role(repo_id: str, branch: str, role: str, now_iso: str) -> None:
         conn.execute(
             "UPDATE repos SET branch_roles = ?, updated_at = ? WHERE repo_id = ?",
             (json.dumps(current, ensure_ascii=False), now_iso, repo_id),
+        )
+
+
+def set_branch_map(repo_id: str, branch_map: dict, now_iso: str) -> None:
+    """Persist target→real-branch mapping for a repo (replaces any existing map)."""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE repos SET branch_map = ?, updated_at = ? WHERE repo_id = ?",
+            (json.dumps(branch_map, ensure_ascii=False), now_iso, repo_id),
         )
 
 

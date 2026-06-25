@@ -383,3 +383,34 @@ def test_register_repo_without_local_path(client):
         resp = client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
     assert resp.status_code == 201
     assert "local_path" not in resp.get_json()["repo"]
+
+
+def test_set_branch_map(client):
+    """PATCH /repos/<name>/branch-map persists the mapping and returns it in the record."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+
+    branch_map = {"developer": "developer", "test": "test", "prod": "develop"}
+    resp = client.patch(
+        "/repos/ov-arizona-restat/branch-map",
+        json=branch_map,
+        headers=_HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["branch_map"] == branch_map
+
+    get_resp = client.get("/repos/ov-arizona-restat", headers=_HEADERS)
+    assert get_resp.get_json()["branch_map"] == branch_map
+
+
+def test_set_branch_map_empty_body_returns_400(client):
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+    resp = client.patch("/repos/ov-arizona-restat/branch-map", json={}, headers=_HEADERS)
+    assert resp.status_code == 400
+
+
+def test_set_branch_map_unknown_repo_returns_404(client):
+    resp = client.patch("/repos/no-such-repo/branch-map", json={"prod": "develop"}, headers=_HEADERS)
+    assert resp.status_code == 404

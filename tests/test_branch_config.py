@@ -25,7 +25,7 @@ def test_defaults_present():
 def test_default_labels():
     assert bc.label("developer") == "desarrollo"
     assert bc.label("test") == "pruebas"
-    assert bc.label("develop") == "producción (pre)"
+    assert bc.label("develop") == "producción"
     assert bc.label("main") == "producción (desplegado)"
 
 
@@ -53,6 +53,27 @@ def test_role_returns_correct_value():
     assert bc.role("developer") == "integration"
     assert bc.role("develop") == "base"
     assert bc.role("nonexistent") is None
+
+
+def test_resolve_target_branch_uses_repo_map():
+    branch_map = {"developer": "developer", "test": "test", "prod": "develop"}
+    assert bc.resolve_target_branch("prod", branch_map) == "develop"
+    assert bc.resolve_target_branch("test", branch_map) == "test"
+    assert bc.resolve_target_branch("developer", branch_map) == "developer"
+
+
+def test_resolve_target_branch_falls_back_to_global_registry():
+    assert bc.resolve_target_branch("test") == "test"
+    assert bc.resolve_target_branch("developer") == "developer"
+
+
+def test_resolve_target_branch_falls_back_to_base_when_unknown():
+    assert bc.resolve_target_branch("unknown-env") == bc.base_branch()
+    assert bc.resolve_target_branch("prod") == bc.base_branch()
+
+
+def test_resolve_target_branch_ignores_base_branch_in_global():
+    assert bc.resolve_target_branch("develop") == bc.base_branch()
 
 
 # ─── Persistence ─────────────────────────────────────────────────────────────

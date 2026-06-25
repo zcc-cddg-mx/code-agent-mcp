@@ -139,6 +139,24 @@ def role(branch: str) -> str | None:
     return entry.get("role") if entry else None
 
 
+def resolve_target_branch(target: str, repo_branch_map: dict | None = None) -> str:
+    """Resolve a logical target name to a real branch name.
+
+    Resolution order:
+    1. repo_branch_map[target]  — per-repo explicit mapping
+    2. global registry: branch named exactly *target* with role != 'base'
+    3. base_branch()            — fallback
+    """
+    if repo_branch_map:
+        mapped = repo_branch_map.get(target)
+        if mapped:
+            return mapped
+    registry = get_registry()
+    if target in registry and registry[target].get("role") != "base":
+        return target
+    return base_branch()
+
+
 def known_targets() -> list[str]:
     """Return all branch names that can be used as PR targets (non-base branches)."""
     return [name for name, meta in get_registry().items() if not meta.get("is_base")]

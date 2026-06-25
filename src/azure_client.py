@@ -338,6 +338,7 @@ def prepare_and_pr_preview():
 
     branch: str = body["branch"]
     target: str = body["target"]
+    real_target: str = _bc.resolve_target_branch(target, repo_record.get("branch_map"))
 
     try:
         file_paths, files_detected, base_branch = _resolve_base_and_files(
@@ -348,12 +349,13 @@ def prepare_and_pr_preview():
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 502
 
-    aux_branch = aux_branch_name(branch, target)
-    existing_pr = _find_existing_pr(repo, aux_branch, target)
+    aux_branch = aux_branch_name(branch, real_target)
+    existing_pr = _find_existing_pr(repo, aux_branch, real_target)
 
     return jsonify({
         "branch":         branch,
         "target":         target,
+        "real_target":    real_target,
         "base_branch":    base_branch,
         "aux_branch":     aux_branch,
         "files_detected": files_detected,
@@ -450,6 +452,7 @@ def prepare_and_pr():
         return jsonify({"error": str(exc)}), 400
     branch: str = body["branch"]
     target: str = body["target"]
+    real_target: str = _bc.resolve_target_branch(target, repo_record.get("branch_map"))
     ticket: str = body["ticket"]
     title: str = body["title"]
     description: str = body.get("description", "")
@@ -465,48 +468,52 @@ def prepare_and_pr():
 
     try:
         aux_branch, action = ensure_auxiliary_branch(
-            repo_path, branch, target, file_paths, ticket, title
+            repo_path, branch, real_target, file_paths, ticket, title
         )
     except Exception as exc:
         log("AZURE", f"ensure_auxiliary_branch error: {exc}")
         return jsonify({"error": str(exc)}), 502
 
-    existing_pr = _find_existing_pr(repo, aux_branch, target)
+    existing_pr = _find_existing_pr(repo, aux_branch, real_target)
     if existing_pr:
-        log("AZURE", f"PR already exists for {aux_branch} → {target}: {existing_pr['pr_id']}")
+        log("AZURE", f"PR already exists for {aux_branch} → {real_target}: {existing_pr['pr_id']}")
         _prs.upsert({
             "pr_id": existing_pr["pr_id"], "pr_url": existing_pr["pr_url"],
-            "repo": repo, "source_branch": aux_branch, "target_branch": target,
+            "repo": repo, "source_branch": aux_branch, "target_branch": real_target,
             "title": title, "status": "active",
             "task_id": body.get("task_id"),
         }, _now_iso())
         return jsonify({
-            "aux_branch": aux_branch,
-            "action": action,
+            "aux_branch":  aux_branch,
+            "action":      action,
+            "target":      target,
+            "real_target": real_target,
             "base_branch": base_branch,
             "files_detected": files_detected,
-            "pr": existing_pr,
+            "pr":          existing_pr,
         }), 200
 
     try:
-        pr = _create_pr(repo, aux_branch, target, title, description)
+        pr = _create_pr(repo, aux_branch, real_target, title, description)
     except RuntimeError as exc:
         log("AZURE", f"PR creation error: {exc}")
         return jsonify({"error": str(exc)}), 502
 
     _prs.upsert({
         "pr_id": pr["pr_id"], "pr_url": pr["pr_url"],
-        "repo": repo, "source_branch": aux_branch, "target_branch": target,
+        "repo": repo, "source_branch": aux_branch, "target_branch": real_target,
         "title": title, "status": "active",
         "task_id": body.get("task_id"),
     }, _now_iso())
 
     return jsonify({
-        "aux_branch": aux_branch,
-        "action": action,
+        "aux_branch":  aux_branch,
+        "action":      action,
+        "target":      target,
+        "real_target": real_target,
         "base_branch": base_branch,
         "files_detected": files_detected,
-        "pr": pr,
+        "pr":          pr,
     }), 201
 
 

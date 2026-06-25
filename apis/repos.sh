@@ -51,8 +51,16 @@ case "${1:-list}" in
       -d "{\"role\": \"$ROLE\"}" | python3 -m json.tool
     ;;
 
+  set-branch-map)
+    REPO_NAME="${REPO_NAME:?set REPO_NAME env var}"
+    # BRANCH_MAP must be a JSON object, e.g.: '{"developer":"developer","test":"test","prod":"develop"}'
+    BRANCH_MAP="${BRANCH_MAP:?set BRANCH_MAP env var as JSON object}"
+    curl -s -X PATCH "$BASE/repos/$REPO_NAME/branch-map" "${H[@]}" \
+      -d "$BRANCH_MAP" | python3 -m json.tool
+    ;;
+
   *)
-    echo "Usage: $0 {register|list|get|refresh|delete|set-role}"
+    echo "Usage: $0 {register|list|get|refresh|delete|set-role|set-branch-map}"
     exit 1
     ;;
 esac
