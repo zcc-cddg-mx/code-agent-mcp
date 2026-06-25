@@ -12,7 +12,7 @@ genérica del code-agent original y descartando toda lógica específica del dom
 
 ## Estado actual del `code-agent-mcp` (2026-06-25)
 
-**141 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
+**148 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
 
 ### Módulos implementados
 
@@ -21,9 +21,9 @@ genérica del code-agent original y descartando toda lógica específica del dom
 | `app.py` | Flask HTTP API, todos los endpoints, Swagger UI (`/apidocs/`) |
 | `src/auth.py` | `X-Agent-Token` header → 401 si falta/incorrecto; `/health` es el único endpoint libre |
 | `src/task_store.py` | SQLite: tabla `tasks` (patrón async 202 + polling); campo `steps` (JSON) para step tracking |
-| `src/repo_store.py` | SQLite: tabla `repos` con columnas `branch_roles` (JSON) y `local_path` (TEXT) |
+| `src/repo_store.py` | SQLite: tabla `repos` con `branch_roles` (JSON), `branch_map` (JSON), `local_path` (TEXT) |
 | `src/project_store.py` | SQLite: tabla `projects` (slug `{org}/{name}`); auto-upsert al registrar repo |
-| `src/branch_config.py` | Diccionario de ramas persistido en SQLite (tabla `branch_config`); hot-reload; defaults del README de `ov-arizona-backend-ecuador` |
+| `src/branch_config.py` | Diccionario global de ramas; `resolve_target_branch(target, branch_map)` resuelve target lógico→rama real |
 | `src/pr_store.py` | SQLite: tabla `prs`; poblada desde `prepare-and-pr`, `pull-requests` y `PATCH pull-requests/<id>` |
 | `src/repo_inspector.py` | Parsea URLs Azure DevOps, `git ls-remote`, clasifica ramas, auto-asigna roles |
 | `src/placer.py` | Git genérico: `create_feature_branch`, `git_add_commit_push`, `ensure_auxiliary_branch` (idempotente), `detect_changed_files`, `detect_base_branch` |
@@ -46,6 +46,7 @@ genérica del code-agent original y descartando toda lógica específica del dom
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repo |
 | `DELETE` | `/repos/<name>` | Eliminar del registro |
 | `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama (sin re-inspeccionar) |
+| `PATCH` | `/repos/<name>/branch-map` | Definir mapping target lógico→rama real (ej. `{"prod":"develop"}`) |
 | `GET` | `/projects` | Listar proyectos con sus repos |
 | `GET` | `/projects/<org>/<name>` | Proyecto por slug |
 | `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada; devuelve `existing_pr`; `repo_path` opcional si `local_path` en registry |

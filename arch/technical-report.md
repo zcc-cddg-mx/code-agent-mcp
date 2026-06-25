@@ -1,8 +1,8 @@
 # Reporte Técnico — code-agent-mcp
 
-**Versión:** 1.3  
+**Versión:** 1.4  
 **Fecha:** 2026-06-25  
-**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 141 tests.
+**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 148 tests.
 
 ---
 
@@ -87,6 +87,7 @@ Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` e
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
 | `DELETE` | `/repos/<name>` | Eliminar del registro |
 | `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama |
+| `PATCH` | `/repos/<name>/branch-map` | Definir mapping target→rama real (ej. `{"prod":"develop"}`) |
 | `GET` | `/projects` | Listar proyectos Azure DevOps (con repos) |
 | `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
 | `GET` | `/config/branches` | Ver diccionario de ramas |
@@ -261,7 +262,7 @@ repo, build_status, summary, error, steps (JSON), created_at, updated_at
 ```
 repo_id, name, git_url, org, project, project_id, azure_repo_id,
 default_branch, web_url, branches (JSON), known_branches (JSON),
-branch_roles (JSON), local_path, size_kb, created_at, updated_at
+branch_roles (JSON), branch_map (JSON), local_path, size_kb, created_at, updated_at
 ```
 
 **`projects`** — proyectos Azure DevOps (deduplicados por slug)
@@ -293,6 +294,7 @@ El registro de repos en SQLite actúa como allowlist definido por el usuario. `P
 sqlite3 /tmp/code-agent-mcp.db \
   "ALTER TABLE repos ADD COLUMN branch_roles TEXT;
    ALTER TABLE repos ADD COLUMN local_path TEXT;
+   ALTER TABLE repos ADD COLUMN branch_map TEXT;
    ALTER TABLE tasks ADD COLUMN steps TEXT;"
 ```
 
@@ -331,7 +333,7 @@ sqlite3 /tmp/code-agent-mcp.db \
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/                             # suite completa (141 tests)
+pytest tests/                             # suite completa (148 tests)
 pytest tests/test_placer.py -v            # git operations + detección automática
 pytest tests/test_azure_client.py -v      # Azure DevOps API + registry validation
 pytest tests/test_repo_inspector.py -v    # repo inspection + role assignment

@@ -31,6 +31,7 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
 | `DELETE` | `/repos/<name>` | Eliminar del registro |
 | `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama (`base`/`integration`/`feature`/`other`) |
+| `PATCH` | `/repos/<name>/branch-map` | Definir mapping target lógico→rama real (ej. `{"prod":"develop"}`) |
 | `GET` | `/projects` | Listar proyectos Azure DevOps (con sus repos) |
 | `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
 | `GET` | `/config/branches` | Ver diccionario de ramas |
@@ -190,6 +191,15 @@ Los roles se almacenan por repo en `branch_roles` y se pueden corregir con `PATC
 }
 ```
 
+El campo `branch_map` es opcional. Permite definir un mapping de target lógico → rama real para este repo, de forma que el caller pueda pasar `target="prod"` y el agente resuelva internamente a `develop`:
+
+```bash
+PATCH /repos/ov-arizona-backend-ecuador/branch-map
+{"developer": "developer", "test": "test", "prod": "develop"}
+```
+
+Si `branch_map` no está definido, se usa la resolución global (`branch_config`).
+
 El proyecto se upserta automáticamente — dos repos del mismo proyecto comparten un único registro.
 
 ## Arquitectura
@@ -208,7 +218,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (141 tests, 2026-06-25)
+tests/                  — pytest (148 tests, 2026-06-25)
 arch/                   — diseño y plan de integración
 ```
 
