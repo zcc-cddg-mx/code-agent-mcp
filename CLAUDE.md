@@ -12,7 +12,7 @@ The full design is in `arch/integration-plan.md`. Read it before starting any im
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/          # 148 tests
+pytest tests/          # 150 tests
 ./run_local.sh         # starts server on port 5001, reads .env.local
 ```
 
@@ -59,7 +59,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `POST` | `/run` | Enqueue git task → 202 |
 | `GET` | `/status/<task_id>` | Poll task result |
 | `GET` | `/tasks` | Recent tasks; `?ticket=` filter, `?limit=` |
-| `POST` | `/repos` | Register repo + immediate inspection; optional `local_path` stored for git ops |
+| `POST` | `/repos` | Register repo + inspection (idempotent — re-register preserves `local_path` and `branch_map`); optional `local_path` |
 | `GET` | `/repos` | List all repos |
 | `GET` | `/repos/<name>` | Get repo by name |
 | `POST` | `/repos/<name>/refresh` | Re-inspect repo |

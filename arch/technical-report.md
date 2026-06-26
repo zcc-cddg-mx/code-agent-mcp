@@ -1,8 +1,8 @@
 # Reporte Técnico — code-agent-mcp
 
-**Versión:** 1.4  
-**Fecha:** 2026-06-25  
-**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 148 tests.
+**Versión:** 1.5  
+**Fecha:** 2026-06-26  
+**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 150 tests.
 
 ---
 
@@ -81,7 +81,7 @@ Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` e
 | `POST` | `/run` | Encolar tarea git: branch + commit + push + aux branch → 202 |
 | `GET` | `/status/<task_id>` | Consultar estado de tarea (polling); incluye campo `steps` |
 | `GET` | `/tasks` | Tareas recientes (`?ticket=`, `?limit=`) |
-| `POST` | `/repos` | Registrar repositorio + inspección inmediata |
+| `POST` | `/repos` | Registrar repositorio + inspección (idempotente — re-registro preserva `local_path` y `branch_map`) |
 | `GET` | `/repos` | Listar repositorios registrados |
 | `GET` | `/repos/<name>` | Obtener repo (incluye `branch_roles` y `branches_by_role`) |
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
@@ -333,7 +333,7 @@ sqlite3 /tmp/code-agent-mcp.db \
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/                             # suite completa (148 tests)
+pytest tests/                             # suite completa (150 tests)
 pytest tests/test_placer.py -v            # git operations + detección automática
 pytest tests/test_azure_client.py -v      # Azure DevOps API + registry validation
 pytest tests/test_repo_inspector.py -v    # repo inspection + role assignment

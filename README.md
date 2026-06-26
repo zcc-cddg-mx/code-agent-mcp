@@ -25,7 +25,7 @@ Todos los endpoints requieren el header `X-Agent-Token`.
 | `POST` | `/run` | Encolar tarea git (branch + commit + push + aux branch) → 202 |
 | `GET` | `/status/<task_id>` | Consultar estado de tarea |
 | `GET` | `/tasks` | Tareas recientes (`?ticket=ZNRX-123`, `?limit=50`) |
-| `POST` | `/repos` | Registrar repositorio + inspección inmediata |
+| `POST` | `/repos` | Registrar repositorio + inspección (idempotente — re-registro preserva `local_path` y `branch_map`) |
 | `GET` | `/repos` | Listar repositorios registrados |
 | `GET` | `/repos/<name>` | Obtener repositorio por nombre |
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
@@ -218,7 +218,7 @@ src/
   azure_client.py       — Azure DevOps REST API v7.1: PR create + status
   logger.py             — structured logging
 apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (148 tests, 2026-06-25)
+tests/                  — pytest (150 tests, 2026-06-26)
 arch/                   — diseño y plan de integración
 ```
 

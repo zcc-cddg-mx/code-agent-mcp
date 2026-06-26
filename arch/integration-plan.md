@@ -12,7 +12,7 @@ genérica del code-agent original y descartando toda lógica específica del dom
 
 ## Estado actual del `code-agent-mcp` (2026-06-25)
 
-**148 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
+**150 tests pasando.** Probado e2e contra Azure DevOps — PRs #2552–#2561 reales creados. Todas las tablas SQLite verificadas con datos reales.
 
 ### Módulos implementados
 
@@ -40,7 +40,7 @@ genérica del code-agent original y descartando toda lógica específica del dom
 | `GET` | `/tasks` | Últimas N tareas; `?ticket=` filtra por ticket |
 | `GET` | `/config/branches` | Ver registro de ramas |
 | `PUT` | `/config/branches` | Actualizar registro (persiste en SQLite, hot-reload) |
-| `POST` | `/repos` | Registrar repo + inspección inmediata |
+| `POST` | `/repos` | Registrar repo + inspección (idempotente — preserva `local_path` y `branch_map`) |
 | `GET` | `/repos` | Listar repos |
 | `GET` | `/repos/<name>` | Repo por nombre (incluye `branch_roles` + `branches_by_role`) |
 | `POST` | `/repos/<name>/refresh` | Re-inspeccionar repo |
