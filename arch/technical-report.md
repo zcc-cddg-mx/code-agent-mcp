@@ -1,294 +1,311 @@
-# Reporte Técnico — code-agent-mcp
+# Technical Report — code-agent-mcp
 
-**Versión:** 1.5  
-**Fecha:** 2026-06-26  
-**Estado:** Funcional — verificado end-to-end contra Azure DevOps (Zurich Insurance Ecuador). 150 tests.
-
----
-
-## 1. Propósito
-
-`code-agent-mcp` es un agente HTTP genérico que ejecuta operaciones git y administra pull requests en Azure DevOps en nombre de un orquestador externo. Su responsabilidad está deliberadamente limitada a la capa de control de versiones:
-
-- **Administra repositorios** — registro, inspección de ramas, clasificación de roles
-- **Crea y actualiza ramas auxiliares** — a partir de un feature branch existente
-- **Integra archivos** — copia el contenido de archivos desde el feature hacia la rama auxiliar
-- **Crea pull requests** — exclusivamente la rama auxiliar hacia la rama de integración elegida
-
-**Principio fundamental:** el agente no toca código. Nunca genera, modifica ni interpreta el contenido de los archivos que mueve. El caller (orquestador) es responsable de generar los archivos antes de invocar este servicio.
+**Version:** 1.5  
+**Date:** 2026-06-26  
+**Status:** Production-ready — verified end-to-end against Azure DevOps (Zurich Insurance Ecuador). 150 tests.
 
 ---
 
-## 2. Arquitectura
+## 1. Purpose
 
-### 2.1 Posición en el sistema
+`code-agent-mcp` is a generic HTTP agent that executes git operations and manages pull requests in Azure DevOps on behalf of an external orchestrator. Its responsibility is deliberately limited to the version control layer:
+
+- **Manages repositories** — registration, branch inspection, role classification
+- **Creates and updates auxiliary branches** — from an existing feature branch
+- **Integrates files** — copies file content from the feature branch into the auxiliary branch
+- **Creates pull requests** — exclusively the auxiliary branch toward the chosen integration branch
+
+**Core principle:** the agent never touches code. It never generates, modifies, or interprets the content of the files it moves. The caller (orchestrator) is responsible for generating files before invoking this service.
+
+---
+
+## 2. Architecture
+
+### 2.1 System position
 
 ```
-claude-mcp-jira (orquestador)
+claude-mcp-jira (orchestrator)
         │
         │  HTTP + X-Agent-Token
         ▼
-code-agent-mcp (este servicio)
+code-agent-mcp (this service)
         │
-        ├── git (SSH/HTTPS) ──────► repositorios Azure DevOps
-        └── Azure DevOps REST API ► pull requests
+        ├── git (HTTPS + PAT) ──────► Azure DevOps repositories
+        └── Azure DevOps REST API ──► pull requests
 ```
 
-El orquestador decide qué archivos generar, qué ticket procesar, y cuándo crear el PR. Este agente solo ejecuta las operaciones git/Azure necesarias.
+The orchestrator decides which files to generate, which ticket to process, and when to create the PR. This agent only executes the required git/Azure operations.
 
 ### 2.2 Stack
 
-| Componente | Tecnología |
+| Component | Technology |
 |---|---|
 | Runtime | Python 3.12, Conda env `code-agent-mcp` |
-| Framework HTTP | Flask + flasgger (Swagger UI en `/apidocs/`) |
-| Persistencia | SQLite (cinco tablas: `tasks`, `repos`, `projects`, `branch_config`, `prs`) |
-| Git | `subprocess` → CLI git con HTTPS + PAT |
-| Azure DevOps | REST API v7.1 (autenticación Basic + PAT) |
+| HTTP framework | Flask + flasgger (Swagger UI at `/apidocs/`) |
+| Persistence | SQLite (five tables: `tasks`, `repos`, `projects`, `branch_config`, `prs`) |
+| Git | `subprocess` → git CLI via HTTPS + PAT |
+| Azure DevOps | REST API v7.1 (Basic auth + PAT) |
 
-### 2.3 Módulos
+### 2.3 Modules
 
 ```
-app.py                  — Flask entry point; todos los endpoints; async task pattern
+app.py                  — Flask entry point; all endpoints; async task pattern
 src/
-  auth.py               — middleware X-Agent-Token → 401
-  task_store.py         — SQLite: tabla tasks (async task pattern + step tracking)
-  repo_store.py         — SQLite: tabla repos (branch_roles JSON, local_path)
-  project_store.py      — SQLite: tabla projects (slug {org}/{name})
-  branch_config.py      — diccionario de ramas persistido en SQLite; hot-reload; campo role por rama
-  pr_store.py           — SQLite: tabla prs; poblada desde prepare-and-pr y pull-requests
-  repo_inspector.py     — parsea URLs Azure DevOps; git ls-remote; auto_assign_roles()
+  auth.py               — X-Agent-Token middleware → 401
+  task_store.py         — SQLite: tasks table (async task pattern + step tracking)
+  repo_store.py         — SQLite: repos table (branch_roles JSON, branch_map JSON, local_path)
+  project_store.py      — SQLite: projects table (slug {org}/{name})
+  branch_config.py      — branch dictionary persisted in SQLite; hot-reload;
+                          resolve_target_branch(target, branch_map) → real branch
+  pr_store.py           — SQLite: prs table; populated from prepare-and-pr and pull-requests
+  repo_inspector.py     — parses Azure DevOps URLs; git ls-remote; auto_assign_roles()
   placer.py             — git: create_feature_branch, ensure_auxiliary_branch,
                           detect_changed_files, detect_base_branch, git_add_commit_push
   azure_client.py       — Azure DevOps REST API: _create_pr, _find_existing_pr, blueprints
-  logger.py             — log estructurado con prefijo [MÓDULO]
-apis/                   — scripts curl de referencia por dominio
-tests/                  — pytest (141 tests)
-arch/                   — diseño y documentación técnica
+  logger.py             — structured logging with [MODULE] prefix
+apis/                   — curl reference scripts by domain
+tests/                  — pytest (150 tests)
+arch/                   — design and technical documentation
 ```
 
 ---
 
 ## 3. API
 
-Todos los endpoints requieren el header `X-Agent-Token` (valor = `TOKEN_AZURE` en `.env`). Único endpoint sin autenticación: `GET /health`.
+All endpoints require the `X-Agent-Token` header (value = `TOKEN_AZURE` env var). The only unauthenticated endpoint is `GET /health`.
 
-### 3.1 Tabla de endpoints
+### 3.1 Endpoint table
 
-| Método | Path | Descripción |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness check (sin token) |
-| `POST` | `/run` | Encolar tarea git: branch + commit + push + aux branch → 202 |
-| `GET` | `/status/<task_id>` | Consultar estado de tarea (polling); incluye campo `steps` |
-| `GET` | `/tasks` | Tareas recientes (`?ticket=`, `?limit=`) |
-| `POST` | `/repos` | Registrar repositorio + inspección (idempotente — re-registro preserva `local_path` y `branch_map`) |
-| `GET` | `/repos` | Listar repositorios registrados |
-| `GET` | `/repos/<name>` | Obtener repo (incluye `branch_roles` y `branches_by_role`) |
-| `POST` | `/repos/<name>/refresh` | Re-inspeccionar repositorio |
-| `DELETE` | `/repos/<name>` | Eliminar del registro |
-| `PATCH` | `/repos/<name>/branches/<branch>` | Corregir rol de una rama |
-| `PATCH` | `/repos/<name>/branch-map` | Definir mapping target→rama real (ej. `{"prod":"develop"}`) |
-| `GET` | `/projects` | Listar proyectos Azure DevOps (con repos) |
-| `GET` | `/projects/<org>/<name>` | Obtener proyecto por slug |
-| `GET` | `/config/branches` | Ver diccionario de ramas |
-| `PUT` | `/config/branches` | Actualizar diccionario de ramas (persiste en SQLite) |
-| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detectar rama base y archivos sin crear nada |
-| `POST` | `/azure/prepare-and-pr` | **Endpoint principal:** verificar/crear aux branch + PR auxiliar (idempotente) |
-| `POST` | `/azure/pull-requests` | Crear PR feature + PR auxiliar simultáneamente (legacy) |
-| `GET` | `/azure/pull-requests/<pr_id>` | Estado PR + build CI |
-| `PATCH` | `/azure/pull-requests/<pr_id>` | Completar / abandonar / reactivar PR |
-| `GET` | `/prs` | Listar PRs persistidos (`?repo=`, `?status=`, `?task_id=`, `?limit=`) |
-| `GET` | `/prs/<pr_id>` | PR con estado refrescado desde Azure DevOps |
+| `GET` | `/health` | Liveness check (no token required) |
+| `POST` | `/run` | Enqueue git task: branch + commit + push + aux branch → 202 |
+| `GET` | `/status/<task_id>` | Poll task status; includes `steps` field |
+| `GET` | `/tasks` | Recent tasks (`?ticket=`, `?limit=`) |
+| `POST` | `/repos` | Register repo + inspection (idempotent — re-register preserves `local_path` and `branch_map`) |
+| `GET` | `/repos` | List registered repositories |
+| `GET` | `/repos/<name>` | Get repo (includes `branch_roles` and `branches_by_role`) |
+| `POST` | `/repos/<name>/refresh` | Re-inspect repository |
+| `DELETE` | `/repos/<name>` | Remove from registry |
+| `PATCH` | `/repos/<name>/branches/<branch>` | Override branch role |
+| `PATCH` | `/repos/<name>/branch-map` | Set target→real branch mapping (e.g. `{"prod":"develop"}`) |
+| `GET` | `/projects` | List Azure DevOps projects (with their repos) |
+| `GET` | `/projects/<org>/<name>` | Get project by slug |
+| `GET` | `/config/branches` | View branch dictionary |
+| `PUT` | `/config/branches` | Update branch dictionary (persisted to SQLite) |
+| `POST` | `/azure/prepare-and-pr/preview` | Dry-run: detect base branch and files without creating anything |
+| `POST` | `/azure/prepare-and-pr` | **Main endpoint:** ensure aux branch + find-or-create aux PR (idempotent) |
+| `POST` | `/azure/pull-requests` | Create feature PR + aux PR simultaneously (legacy) |
+| `GET` | `/azure/pull-requests/<pr_id>` | PR status + CI build status |
+| `PATCH` | `/azure/pull-requests/<pr_id>` | Complete / abandon / reactivate PR (`status`: `completed\|abandoned\|active`) |
+| `GET` | `/prs` | List stored PRs (`?repo=`, `?status=`, `?task_id=`, `?limit=`) |
+| `GET` | `/prs/<pr_id>` | PR record with status refreshed from Azure DevOps |
 
-### 3.2 Endpoint principal: `POST /azure/prepare-and-pr`
+### 3.2 Main endpoint: `POST /azure/prepare-and-pr`
 
-Encapsula el flujo completo de rama auxiliar y PR en una sola llamada idempotente.
+Encapsulates the full auxiliary branch and PR flow in a single idempotent call.
 
-**Request — campos requeridos:** `repo`, `branch`, `target`, `ticket`, `title`  
-**Campos opcionales:** `repo_path`, `files`, `base_branch`, `description`
+**Required fields:** `repo`, `branch`, `target`, `ticket`, `title`  
+**Optional fields:** `repo_path`, `files`, `base_branch`, `description`
 
 ```json
 {
-  "repo":        "ov-arizona-backend-ecuador",
-  "branch":      "feature/ZNRX_67108_renov_agosto",
-  "target":      "test",
-  "ticket":      "ZNRX-67108",
-  "title":       "ZNRX-67108 Renovaciones agosto → test"
+  "repo":   "ov-arizona-backend-ecuador",
+  "branch": "feature/ZNRX_67108_renov_agosto",
+  "target": "test",
+  "ticket": "ZNRX-67108",
+  "title":  "ZNRX-67108 Renovaciones agosto → test"
 }
 ```
 
-`repo_path` es opcional si el repo fue registrado con `local_path` — se resuelve automáticamente desde el registry. Si se pasa en el body, toma precedencia (backward compatible).  
-Si `files` se omite: auto-detectado via `git diff --name-only origin/{base_branch}...origin/{branch}`.  
-Si `base_branch` se omite: inferido via `git merge-base` comparando con los candidatos del repo registrado (base-role primero, luego integration).
+`repo_path` is optional if the repo was registered with `local_path` — resolved automatically from the registry. If provided in the body, it takes precedence (backward compatible).  
+If `files` is omitted: auto-detected via `git diff --name-only origin/{base_branch}...origin/{branch}`.  
+If `base_branch` is omitted: inferred via `git merge-base` against the repo's registered branch candidates (base-role branches first, then integration).  
+`target` is resolved through `resolve_target_branch(target, repo.branch_map)` — the per-repo `branch_map` translates logical names (e.g. `"prod"`) to real branch names (e.g. `"develop"`).
 
 **Response (201):**
 ```json
 {
   "aux_branch":     "feature/ZNRX_67108_renov_agosto_test_auxiliar",
   "action":         "created",
+  "target":         "test",
+  "real_target":    "test",
   "base_branch":    "develop",
-  "files_detected": ["/ruta/local/al/repo/src/File.java"],
+  "files_detected": ["/local/path/to/repo/src/File.java"],
   "pr":             {"pr_id": 2554, "pr_url": "https://dev.azure.com/..."}
 }
 ```
 
-| `action` | Significado |
+| `action` | Meaning |
 |---|---|
-| `created` | Rama auxiliar no existía; creada desde `origin/{target}` |
-| `updated` | Rama existía pero archivos diferían; cambios aplicados |
-| `unchanged` | Rama y PR ya existían y están al día; PR devuelto sin duplicar |
+| `created` | Auxiliary branch did not exist; created from `origin/{real_target}` |
+| `updated` | Branch existed but files were outdated; changes applied |
+| `unchanged` | Branch and PR already existed and are up to date; PR returned without duplication |
 
 ### 3.3 Preview (dry-run): `POST /azure/prepare-and-pr/preview`
 
-Mismos campos que `prepare-and-pr` pero `ticket` y `title` son opcionales. No crea nada — solo ejecuta la fase de detección y consulta si ya existe un PR.
+Same fields as `prepare-and-pr` but `ticket` and `title` are optional. Creates nothing — only runs the detection phase and checks whether a PR already exists.
 
 **Response (200):**
 ```json
 {
   "branch":         "feature/test_mcp_jira_multifile",
   "target":         "test",
+  "real_target":    "test",
   "base_branch":    "develop",
   "aux_branch":     "feature/test_mcp_jira_multifile_test_auxiliar",
-  "files_detected": ["...avisos.component.css", "...avisos.component.html", "...avisos.component.ts"],
+  "files_detected": ["...avisos.component.css", "...avisos.component.html"],
   "existing_pr":    {"pr_id": 2560, "pr_url": "..."} | null
 }
 ```
 
-`existing_pr: null` → ejecutar `prepare-and-pr` creará el PR.  
-`existing_pr: {...}` → ya existe PR activo; `prepare-and-pr` lo devolverá sin duplicar.
+`existing_pr: null` → running `prepare-and-pr` will create the PR.  
+`existing_pr: {...}` → active PR already exists; `prepare-and-pr` will return it without duplication.
 
 ---
 
-## 4. Flujos git
+## 4. Git flows
 
-### 4.1 Registro de repositorio
+### 4.1 Repository registration
 
 ```
 POST /repos {git_url}
     │
     ├── parse_azure_url()          → {org, project, repo, clean_url}
-    ├── requests.get(Azure API)    → metadata del repo (default_branch, project_id, size_kb)
-    ├── git ls-remote --heads      → lista de ramas remotas
+    ├── requests.get(Azure API)    → repo metadata (default_branch, project_id, size_kb)
+    ├── git ls-remote --heads      → list of remote branches
     ├── classify_branches()        → {integration: [], feature: [], other: []}
-    ├── auto_assign_roles()        → {branch: role} por rama
-    ├── repo_store.upsert()        → persiste en SQLite (tabla repos)
-    └── project_store.upsert()     → upsert del proyecto (tabla projects)
+    ├── auto_assign_roles()        → {branch: role} per branch
+    ├── repo_store.upsert()        → persisted to SQLite (repos table)
+    └── project_store.upsert()     → project upserted (projects table)
 ```
 
-### 4.2 Roles de ramas
+Re-registering an existing repo re-inspects it and preserves `local_path` and `branch_map` if not provided in the new request.
 
-La asignación sigue esta prioridad:
+### 4.2 Branch roles
 
-1. Si la rama está en el diccionario global (`branch_config`) → usa su campo `role`
-2. Si empieza con `feature/` o `fix/` → `"feature"`
-3. Si está en el conjunto de nombres de integración conocidos → `"integration"`
+Assignment follows this priority:
+
+1. Branch name is in the global dictionary (`branch_config`) → use its `role` field
+2. Starts with `feature/` or `fix/` → `"feature"`
+3. In the set of known integration branch names → `"integration"`
 4. Default → `"other"`
 
-Roles predefinidos en el diccionario global (persiste en SQLite, configurable vía API):
+Default roles in the global dictionary (persisted in SQLite, configurable via API):
 
-| Rama | Rol | Notas |
+| Branch | Role | Notes |
 |---|---|---|
-| `develop` | `base` | Origen de features (`is_base=True`) |
+| `develop` | `base` | Feature branch origin (`is_base=True`); PR target for production |
 | `developer` | `integration` | DEV-UAT |
 | `test` | `integration` | Preprod |
-| `main` | `integration` | Producción |
+| `main` | `integration` | Production (DevOps integrates develop→main manually) |
 
-Los roles se pueden corregir por repo sin re-inspeccionar: `PATCH /repos/<name>/branches/<branch>`.
+Roles can be overridden per-repo without re-inspecting: `PATCH /repos/<name>/branches/<branch>`.
 
-### 4.3 Detección automática de archivos y rama base
+### 4.3 Per-repo branch map
+
+`PATCH /repos/<name>/branch-map` stores a `{logical_target: real_branch}` mapping. Used by `resolve_target_branch()` to translate caller-supplied logical names to real branch names:
+
+```
+{"developer": "developer", "test": "test", "prod": "develop"}
+```
+
+Resolution order: per-repo `branch_map` → global registry → `base_branch()` fallback.
+
+### 4.4 Auto-detection of files and base branch
 
 **`detect_changed_files(repo_root, feature_branch, base_branch)` → `list[Path]`**  
-Ejecuta `git diff --name-only origin/{base_branch}...origin/{feature_branch}`. Ambas ramas deben estar fetched. Lanza `RuntimeError` en caso de fallo git.
+Runs `git diff --name-only origin/{base_branch}...origin/{feature_branch}`. Both branches must be fetched. Raises `RuntimeError` on git failure.
 
 **`detect_base_branch(repo_root, feature_branch, candidates)` → `str`**  
-Para cada candidato ejecuta `git merge-base origin/{candidate} origin/{feature_branch}` + `git rev-list --count {hash}`. Elige el de menor distancia. En empate, gana el primero de la lista (poner base-role primero). Fallback al primer candidato si todos los merge-base fallan.
+For each candidate runs `git merge-base origin/{candidate} origin/{feature_branch}` + `git rev-list --count {hash}`. Picks the closest ancestor. On tie, the first candidate wins (put base-role branches first). Falls back to the first candidate if all merge-bases fail.
 
-### 4.4 Creación de rama auxiliar (`ensure_auxiliary_branch`)
+### 4.5 Auxiliary branch creation (`ensure_auxiliary_branch`)
 
 ```
 1. git fetch origin {target}
 2. git fetch origin {feature_branch}
 3. git ls-remote --heads origin {aux}
 
-Si NO existe:
+If NOT found:
     4. git checkout -b {aux} origin/{target}
-    5. git show origin/{feature}:{file} → escribe en disco por cada archivo
+    5. git show origin/{feature}:{file} → write to disk for each file
     6. git add + git commit
     7. git push --set-upstream origin {aux}
-    8. git checkout {HEAD original}
-    9. git branch -D {aux}              ← limpieza local
+    8. git checkout {original HEAD}
+    9. git branch -D {aux}              ← local cleanup
 
-Si existe:
+If found:
     4. git fetch origin {aux}
-    5. Comparar contenido: origin/{feature}:{file} vs origin/{aux}:{file}
-    6. Si todos coinciden → retorna "unchanged"
-    7. Si hay diferencias:
+    5. Compare content: origin/{feature}:{file} vs origin/{aux}:{file}
+    6. All match → return "unchanged"
+    7. Differences found:
        git checkout -b {aux}_update_tmp origin/{aux}
-       aplicar archivos desactualizados
+       apply outdated files
        git add + git commit (update)
        git branch -m {aux}_update_tmp {aux}
        git push --force-with-lease origin {aux}
-       git checkout {HEAD original}
-       git branch -D {aux}              ← limpieza local
+       git checkout {original HEAD}
+       git branch -D {aux}              ← local cleanup
 ```
 
-La función siempre restaura el HEAD al estado previo y elimina ramas temporales locales.
+The function always restores HEAD to its previous state and deletes any temporary local branches.
 
-### 4.5 Step tracking en `POST /run`
+### 4.6 Step tracking in `POST /run`
 
-El worker inicializa los tres pasos como `pending` al arrancar y los actualiza en tiempo real:
+The worker initializes all three steps as `pending` on startup and updates them in real time:
 
 ```
-create_branch   → pending → running → done | failed
-commit_push     → pending → running → done | failed
+create_branch     → pending → running → done | failed
+commit_push       → pending → running → done | failed
 create_aux_branch → pending → running → done | failed
 ```
 
-El campo `steps` (JSON) se devuelve en `GET /status/<task_id>`. Si un paso falla, los siguientes quedan en `pending`.
+The `steps` field (JSON) is returned by `GET /status/<task_id>`. If a step fails, subsequent steps remain `pending`.
 
 ---
 
-## 5. Persistencia
+## 5. Persistence
 
-### 5.1 Tablas SQLite
+### 5.1 SQLite tables
 
-**`tasks`** — operaciones git asíncronas
+**`tasks`** — asynchronous git operations
 ```
 task_id, ticket, status, branch, aux_branch, commit_id,
 repo, build_status, summary, error, steps (JSON), created_at, updated_at
 ```
 
-**`repos`** — repositorios registrados
+**`repos`** — registered repositories
 ```
 repo_id, name, git_url, org, project, project_id, azure_repo_id,
 default_branch, web_url, branches (JSON), known_branches (JSON),
 branch_roles (JSON), branch_map (JSON), local_path, size_kb, created_at, updated_at
 ```
 
-**`projects`** — proyectos Azure DevOps (deduplicados por slug)
+**`projects`** — Azure DevOps projects (deduplicated by slug)
 ```
 project_id (slug org/name), org, name, azure_project_id,
 description, visibility, state, web_url, created_at, updated_at
 ```
 
-**`branch_config`** — diccionario de ramas
+**`branch_config`** — branch dictionary
 ```
 branch (PK), meta (JSON: label, environment, url, is_base, role)
 ```
-Sembrado con 4 defaults en el primer `init_db()`. Configurable vía `PUT /config/branches`.
+Seeded with 4 defaults on the first `init_db()` call. Configurable via `PUT /config/branches`.
 
-**`prs`** — pull requests Azure DevOps
+**`prs`** — Azure DevOps pull requests
 ```
 pr_id (PK), pr_url, repo, source_branch, target_branch,
 title, status, task_id (nullable FK), created_at, updated_at
 ```
-Poblada desde `prepare-and-pr`, `pull-requests` y `PATCH pull-requests/<id>`.
+Populated from `prepare-and-pr`, `pull-requests`, and `PATCH pull-requests/<id>`.
 
-### 5.2 Seguridad — registro como allowlist
+### 5.2 Security — registry as allowlist
 
-El registro de repos en SQLite actúa como allowlist definido por el usuario. `POST /azure/prepare-and-pr`, `POST /azure/prepare-and-pr/preview` y `POST /run` devuelven **403** si el repo no está registrado. El Azure DevOps PAT provee una segunda capa de autorización en todas las llamadas REST.
+The repo registry acts as a user-defined allowlist. `POST /azure/prepare-and-pr`, `POST /azure/prepare-and-pr/preview`, and `POST /run` return **403** if the repo is not registered. The Azure DevOps PAT provides a second authorization layer for all REST calls.
 
-### 5.3 Migración para instancias existentes
+### 5.3 Migration for existing installs
 
 ```bash
 sqlite3 /tmp/code-agent-mcp.db \
@@ -298,34 +315,39 @@ sqlite3 /tmp/code-agent-mcp.db \
    ALTER TABLE tasks ADD COLUMN steps TEXT;"
 ```
 
+All migrations are also applied automatically by `init_db()` on startup via `PRAGMA table_info`.
+
 ---
 
-## 6. Configuración
+## 6. Configuration
 
-### 6.1 Variables de entorno
+### 6.1 Environment variables
 
-| Variable | Obligatoria | Descripción |
+| Variable | Required | Description |
 |---|---|---|
-| `TOKEN_AZURE` | Sí | Secreto compartido con el caller (`X-Agent-Token`) |
-| `AZURE_PAT` | Sí | Personal Access Token de Azure DevOps |
-| `AZURE_ORG` | Sí | Organización Azure DevOps (ej. `ZurichInsurance-EC`) |
-| `AZURE_PROJECT` | Sí | Proyecto default para creación de PRs |
-| `GIT_USERNAME` | Sí | Usuario para autenticación git HTTPS |
-| `GIT_PAT` | Sí | PAT para autenticación git HTTPS |
-| `TASKS_DB` | Sí | Ruta al archivo SQLite (todas las tablas comparten este archivo) |
-| `PORT` | No | Puerto del servidor (default: 5000) |
-| `RETENTION_DAYS` | No | Días de retención de tareas en SQLite (default: 90) |
-| `CALLBACK_VERIFY_SSL` | No | Verificar SSL en callbacks (default: `true`) |
+| `TOKEN_AZURE` | Yes | Shared secret with the caller (`X-Agent-Token` header) |
+| `AGENT_TOKEN` | No | Alias for `TOKEN_AZURE` — same value, for callers that use this name |
+| `AZURE_PAT` | Yes | Azure DevOps Personal Access Token |
+| `AZURE_ORG` | Yes | Azure DevOps organization (e.g. `ZurichInsurance-EC`) |
+| `AZURE_PROJECT` | Yes | Default project for PR creation |
+| `GIT_USERNAME` | Yes | Username for HTTPS git authentication |
+| `GIT_PAT` | Yes | PAT for HTTPS git authentication |
+| `TASKS_DB` | Yes | Path to the SQLite file (all tables share this file) |
+| `PORT` | No | Server port (default: 5000) |
+| `RETENTION_DAYS` | No | Task retention in SQLite in days (default: 90) |
+| `CALLBACK_VERIFY_SSL` | No | Verify SSL on callback POSTs (default: `true`) |
 
-### 6.2 Arranque local
+### 6.2 Local startup
 
 ```bash
-# Crear .env.local con las variables anteriores
-./run_local.sh   # mata proceso existente en el puerto, sourcea .env.local,
-                 # sets TASKS_DB=/tmp/code-agent-mcp.db, levanta en puerto 5001
+# Create .env.local with the variables above
+./run_local.sh   # kills any existing process on the port, sources .env.local,
+                 # sets TASKS_DB=/tmp/code-agent-mcp.db, starts on port 5001
 ```
 
-> **Nota:** `conda run` no hereda variables del shell padre. Siempre usar `run_local.sh` o pasar las variables explícitamente.
+> **Note:** `conda run` does not inherit parent shell exports. Always use `run_local.sh` or pass variables explicitly.
+
+The SQLite database at `TASKS_DB` persists across server restarts — it is not deleted or reset on startup.
 
 ---
 
@@ -333,36 +355,38 @@ sqlite3 /tmp/code-agent-mcp.db \
 
 ```bash
 conda activate code-agent-mcp
-pytest tests/                             # suite completa (150 tests)
-pytest tests/test_placer.py -v            # git operations + detección automática
+pytest tests/                             # full suite (150 tests)
+pytest tests/test_placer.py -v            # git operations + auto-detection
 pytest tests/test_azure_client.py -v      # Azure DevOps API + registry validation
 pytest tests/test_repo_inspector.py -v    # repo inspection + role assignment
 pytest tests/test_repo_endpoints.py -v    # /repos, /projects, /run endpoints
-pytest tests/test_branch_config.py -v     # diccionario de ramas SQLite
+pytest tests/test_branch_config.py -v     # branch dictionary SQLite
 pytest tests/test_pr_store.py -v          # PR persistence + endpoints
 ```
 
-Todos los tests mockean subprocess y requests — no requieren conexión a Azure DevOps ni un repo git real.
+All tests mock `subprocess` and `requests` — no Azure DevOps connection or real git repository required.
 
 ---
 
 ## 8. Backlog
 
-| Prioridad | Ítem |
+| Priority | Item |
 |---|---|
-| Alta | Cliente HTTP en `claude-mcp-jira` + MCP tools (`run_code_agent`, `get_code_agent_status`, `create_azure_pull_request`, `get_pull_request_status`) — implementación gestionada desde ese proyecto |
-| Baja | `docker-compose.yml` para desarrollo conjunto con `claude-mcp-jira` |
-| Baja | Paginación en `GET /tasks` |
-| Baja | UI para editar diccionario de ramas |
-| Futura | Votos en PRs (`PUT /azure/pull-requests/<pr_id>/vote` — approve/reject/abstain/reset) |
-| Futura | Administración remota de repos (modo volumen: `POST /repos {clone:true}` auto-clona en `/data/repos/{name}`; modo API: reemplazar subprocess con Azure DevOps REST — ver `TODO.md`) |
+| High | HTTP client in `claude-mcp-jira` + MCP tools (`run_code_agent`, `get_code_agent_status`, `create_azure_pull_request`, `get_pull_request_status`) — implementation owned by that project |
+| Low | `docker-compose.yml` for joint local development with `claude-mcp-jira` |
+| Low | Pagination in `GET /tasks` |
+| Low | UI to edit the branch dictionary |
+| Future | PR votes (`PUT /azure/pull-requests/<pr_id>/vote` — approve/reject/abstain/reset) |
+| Future | Remote repo management: volume mode (`POST /repos {clone:true}` — auto-clones to `/data/repos/{name}`) or REST API mode (replace subprocess with Azure DevOps REST calls) — see `TODO.md` |
 
 ---
 
-## 9. Repositorios relacionados
+## 9. Related repositories
 
-| Repo | Ruta local | Relación |
+| Repo | Local path | Relationship |
 |---|---|---|
-| `claude-mcp-jira` | `/home/idavid/dev/claude/claude-mcp-jira` | Orquestador — consumidor futuro de este servicio |
-| `ov-arizona-backend-ecuador` | `/home/idavid/dev/ov/ov-arizona-backend-ecuador` | Repo git destino principal de las operaciones |
-| `ov-suscripcion-automation` | `/home/idavid/dev/ov/ov-suscripcion-automation` | Origen de la infraestructura base copiada; no modificar |
+| `claude-mcp-jira` | `/home/idavid/dev/claude/claude-mcp-jira` | Orchestrator — future consumer of this service |
+| `ov-arizona-backend-ecuador` | `/home/idavid/dev/ov/ov-arizona-backend-ecuador` | Primary git target repository |
+| `ov-arizona-frontend-ecuador` | `/home/idavid/dev/ov/ov-arizona-frontend-ecuador` | Secondary git target repository |
+| `ov-arizona-core` | `/home/idavid/dev/ov/ov-arizona-core` | Secondary git target repository |
+| `ov-suscripcion-automation` | `/home/idavid/dev/ov/ov-suscripcion-automation` | Source of copied base infrastructure; do not modify |
