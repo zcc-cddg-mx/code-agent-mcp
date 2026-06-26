@@ -497,7 +497,7 @@ def register_repo():
               example: /home/idavid/dev/ov/ov-arizona-backend-ecuador
     responses:
       201:
-        description: Repository and project registered
+        description: Repository registered or updated (idempotent — re-registering re-inspects and preserves local_path)
         schema:
           type: object
           properties:
@@ -505,8 +505,6 @@ def register_repo():
             project: {type: object}
       400:
         description: Missing or invalid git_url
-      409:
-        description: Repository already registered
       502:
         description: Azure API or git ls-remote call failed
     """
@@ -530,11 +528,6 @@ def register_repo():
 
     repo_name = parsed["repo"]
 
-    # Reject duplicates
-    existing = repo_store.get_by_name(repo_name)
-    if existing:
-        return jsonify({"error": f"Repository '{repo_name}' already registered", "repo": existing}), 409
-
     now = _now_iso()
     try:
         result = inspect(git_url, pat)
@@ -547,11 +540,17 @@ def register_repo():
     log("REPO", f"project '{result['project']['project_id']}' registered/updated")
 
     local_path = (body.get("local_path") or "").strip() or None
-    repo_id = str(_uuid.uuid4())[:8]
+    existing = repo_store.get_by_name(repo_name)
+    if existing:
+        repo_id = existing["repo_id"]
+        if local_path is None:
+            local_path = existing.get("local_path")
+    else:
+        repo_id = str(_uuid.uuid4())[:8]
     record = {"repo_id": repo_id, "last_inspected_at": now, "created_at": now,
               "local_path": local_path, **result["repo"]}
     repo_store.upsert(record, now)
-    log("REPO", f"registered '{repo_name}' (id={repo_id})")
+    log("REPO", f"{'updated' if existing else 'registered'} '{repo_name}' (id={repo_id})")
     return jsonify({
         "repo":    repo_store.get(repo_id),
         "project": project_store.get(result["project"]["project_id"]),

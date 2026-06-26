@@ -108,10 +108,11 @@ def test_register_repo_invalid_url(client):
 
 
 def test_register_repo_duplicate(client):
+    """Re-registering an existing repo re-inspects it (idempotent, returns 201)."""
     with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
         client.post("/repos", json={"git_url": "https://dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat"}, headers=_HEADERS)
         resp = client.post("/repos", json={"git_url": "https://dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-restat"}, headers=_HEADERS)
-    assert resp.status_code == 409
+    assert resp.status_code == 201
 
 
 def test_register_two_repos_same_project_deduplicates_project(client):
@@ -414,3 +415,23 @@ def test_set_branch_map_empty_body_returns_400(client):
 def test_set_branch_map_unknown_repo_returns_404(client):
     resp = client.patch("/repos/no-such-repo/branch-map", json={"prod": "develop"}, headers=_HEADERS)
     assert resp.status_code == 404
+
+
+def test_reregister_preserves_local_path(client):
+    """Re-registering a repo without local_path keeps the existing one."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT, "local_path": "/orig/path"}, headers=_HEADERS)
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        resp = client.post("/repos", json={"git_url": _URL_OV_RESTAT}, headers=_HEADERS)
+    assert resp.status_code == 201
+    assert resp.get_json()["repo"]["local_path"] == "/orig/path"
+
+
+def test_reregister_updates_local_path(client):
+    """Re-registering with a new local_path overwrites the existing one."""
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        client.post("/repos", json={"git_url": _URL_OV_RESTAT, "local_path": "/orig/path"}, headers=_HEADERS)
+    with patch("src.repo_inspector.inspect", return_value=_INSPECT_RESULT):
+        resp = client.post("/repos", json={"git_url": _URL_OV_RESTAT, "local_path": "/new/path"}, headers=_HEADERS)
+    assert resp.status_code == 201
+    assert resp.get_json()["repo"]["local_path"] == "/new/path"
