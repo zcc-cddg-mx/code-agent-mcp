@@ -82,12 +82,10 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 ## Environment variables
 
 ```
-TOKEN_AZURE=          # shared secret with claude-mcp-jira
-AZURE_PAT=            # Azure DevOps Personal Access Token
+TOKEN_AZURE=          # Azure DevOps PAT — REST API + git credentials + X-Agent-Token auth
 AZURE_ORG=            # Azure DevOps organization
 AZURE_PROJECT=        # Azure DevOps project (default for PR creation)
 GIT_USERNAME=         # git credential username
-GIT_PAT=              # git credential PAT
 TASKS_DB=/data/tasks.db
 PORT=5000
 CALLBACK_VERIFY_SSL=true

@@ -13,7 +13,7 @@ Endpoints registered as a Flask Blueprint:
     status:       active | completed | abandoned
     build_status: pending | succeeded | failed | unknown
 
-Required env vars: AZURE_PAT, AZURE_ORG, AZURE_PROJECT
+Required env vars: TOKEN_AZURE, AZURE_ORG, AZURE_PROJECT
 Optional env var:  AZURE_REPO (default repo name when not provided in body)
 """
 
@@ -39,7 +39,7 @@ def _now_iso() -> str:
 
 _ORG = os.environ.get("AZURE_ORG", "")
 _PROJECT = os.environ.get("AZURE_PROJECT", "")
-_PAT = os.environ.get("AZURE_PAT", "")
+_PAT = os.environ.get("TOKEN_AZURE", "")
 _API_VERSION = "7.1"
 
 _VERIFY_SSL = os.environ.get("AZURE_VERIFY_SSL", "true").strip().lower() != "false"
@@ -57,7 +57,7 @@ def _pr_url(org: str, project: str, repo: str, pr_id: int) -> str:
 def _create_pr(repo: str, source_branch: str, target_branch: str, title: str, description: str) -> dict:
     """Call Azure DevOps REST API to create a single PR. Returns {pr_id, pr_url}."""
     if not _PAT:
-        raise RuntimeError("AZURE_PAT is not configured")
+        raise RuntimeError("TOKEN_AZURE is not configured")
     if not _ORG or not _PROJECT:
         raise RuntimeError("AZURE_ORG and AZURE_PROJECT must be configured")
 

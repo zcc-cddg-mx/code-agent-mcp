@@ -3,8 +3,7 @@
 #
 # Required environment variables:
 #   GIT_USERNAME  — Azure Repos username
-#   GIT_PAT       — Azure Repos PAT (Code Read+Write)
-#   TOKEN_AZURE   — shared secret for X-Agent-Token authentication
+#   TOKEN_AZURE   — Azure PAT (Code Read+Write) and shared secret for X-Agent-Token
 #
 # Optional:
 #   REPO_PATH     — path to clone/update the target repo (default: /repos/ov-arizona-backend-ecuador)
@@ -13,7 +12,6 @@
 set -eu
 
 : "${GIT_USERNAME:?GIT_USERNAME is required}"
-: "${GIT_PAT:?GIT_PAT is required}"
 : "${TOKEN_AZURE:?TOKEN_AZURE is required}"
 
 REPO_PATH="${REPO_PATH:-/repos/ov-arizona-backend-ecuador}"
@@ -23,8 +21,8 @@ PORT="${PORT:-5000}"
 # 1. Configure git credentials
 # ─────────────────────────────────────────────────────────────────────────────
 git config --global credential.helper store
-printf "https://ZurichInsurance-EC:%s@dev.azure.com\n" "${GIT_PAT}" >> ~/.git-credentials
-printf "https://%s:%s@dev.azure.com\n" "${GIT_USERNAME}" "${GIT_PAT}" >> ~/.git-credentials
+printf "https://ZurichInsurance-EC:%s@dev.azure.com\n" "${TOKEN_AZURE}" >> ~/.git-credentials
+printf "https://%s:%s@dev.azure.com\n" "${GIT_USERNAME}" "${TOKEN_AZURE}" >> ~/.git-credentials
 
 git config --global user.email "${GIT_USERNAME}@zurichinsurance.com"
 git config --global user.name  "${GIT_USERNAME}"
@@ -39,7 +37,7 @@ git config --global --add safe.directory "${REPO_PATH}"
 if [ ! -d "${REPO_PATH}/.git" ]; then
     echo "[entrypoint] first start — cloning repo backend..."
     git clone \
-        "https://ZurichInsurance-EC:${GIT_PAT}@dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-backend-ecuador" \
+        "https://ZurichInsurance-EC:${TOKEN_AZURE}@dev.azure.com/ZurichInsurance-EC/Oficina-Virtual-ZEC/_git/ov-arizona-backend-ecuador" \
         "${REPO_PATH}"
     cd "${REPO_PATH}"
     git checkout developer

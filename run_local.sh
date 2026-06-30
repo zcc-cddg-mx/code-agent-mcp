@@ -16,14 +16,14 @@ set +a
 # Override para desarrollo local (no Docker)
 export TASKS_DB="${TASKS_DB_LOCAL:-/tmp/code-agent-mcp.db}"
 
-# Configure git credentials from AZURE_PAT (mirrors docker-entrypoint.sh behavior)
-if [[ -n "${AZURE_PAT:-}" ]]; then
+# Configure git credentials from TOKEN_AZURE (mirrors docker-entrypoint.sh behavior)
+if [[ -n "${TOKEN_AZURE:-}" ]]; then
   CRED_FILE="$HOME/.git-credentials"
   touch "$CRED_FILE" && chmod 600 "$CRED_FILE"
   # Remove stale entries for dev.azure.com then re-add with current PAT
   grep -v "dev\.azure\.com" "$CRED_FILE" > "$CRED_FILE.tmp" 2>/dev/null && mv "$CRED_FILE.tmp" "$CRED_FILE" || true
-  printf "https://ZurichInsurance-EC:%s@dev.azure.com\n" "${AZURE_PAT}" >> "$CRED_FILE"
-  printf "https://%s:%s@dev.azure.com\n" "${GIT_USERNAME:-carlos.duarte2}" "${AZURE_PAT}" >> "$CRED_FILE"
+  printf "https://ZurichInsurance-EC:%s@dev.azure.com\n" "${TOKEN_AZURE}" >> "$CRED_FILE"
+  printf "https://%s:%s@dev.azure.com\n" "${GIT_USERNAME:-carlos.duarte2}" "${TOKEN_AZURE}" >> "$CRED_FILE"
   git config --global credential.helper store 2>/dev/null || true
 fi
 

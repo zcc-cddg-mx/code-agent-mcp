@@ -516,9 +516,9 @@ def register_repo():
     if not git_url:
         return jsonify({"error": "git_url is required"}), 400
 
-    pat = os.environ.get("AZURE_PAT", "")
+    pat = os.environ.get("TOKEN_AZURE", "")
     if not pat:
-        return jsonify({"error": "AZURE_PAT not configured on server"}), 500
+        return jsonify({"error": "TOKEN_AZURE not configured on server"}), 500
 
     # Parse URL first to get the canonical name
     try:
@@ -782,9 +782,9 @@ def refresh_repo(repo_name: str):
     if not repo:
         return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
 
-    pat = os.environ.get("AZURE_PAT", "")
+    pat = os.environ.get("TOKEN_AZURE", "")
     if not pat:
-        return jsonify({"error": "AZURE_PAT not configured on server"}), 500
+        return jsonify({"error": "TOKEN_AZURE not configured on server"}), 500
 
     now = _now_iso()
     try:

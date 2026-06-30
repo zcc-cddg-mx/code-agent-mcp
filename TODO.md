@@ -81,7 +81,7 @@ Estado actual: servicio funcional y verificado con detección automática de ram
 - [x] Swagger UI via flasgger (`/apidocs/`)
 - [x] `run_local.sh` — arranque local sin Docker
 - [x] `apis/` — scripts curl de referencia (health, repos, projects, tasks, config, azure)
-- [x] Renombrado `AGENT_TOKEN` → `TOKEN_AZURE` (usa el PAT del sistema)
+- [x] Consolidado a variable única `TOKEN_AZURE` — cubre REST API, git credentials y X-Agent-Token; eliminados `AZURE_PAT`, `GIT_PAT`, `AGENT_TOKEN`, `PAT`
 
 ---
 

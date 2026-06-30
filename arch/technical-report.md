@@ -325,13 +325,10 @@ All migrations are also applied automatically by `init_db()` on startup via `PRA
 
 | Variable | Required | Description |
 |---|---|---|
-| `TOKEN_AZURE` | Yes | Shared secret with the caller (`X-Agent-Token` header) |
-| `AGENT_TOKEN` | No | Alias for `TOKEN_AZURE` — same value, for callers that use this name |
-| `AZURE_PAT` | Yes | Azure DevOps Personal Access Token |
+| `TOKEN_AZURE` | Yes | Azure DevOps PAT — used for REST API calls, HTTPS git credentials, and `X-Agent-Token` service authentication |
 | `AZURE_ORG` | Yes | Azure DevOps organization (e.g. `ZurichInsurance-EC`) |
 | `AZURE_PROJECT` | Yes | Default project for PR creation |
 | `GIT_USERNAME` | Yes | Username for HTTPS git authentication |
-| `GIT_PAT` | Yes | PAT for HTTPS git authentication |
 | `TASKS_DB` | Yes | Path to the SQLite file (all tables share this file) |
 | `PORT` | No | Server port (default: 5000) |
 | `RETENTION_DAYS` | No | Task retention in SQLite in days (default: 90) |

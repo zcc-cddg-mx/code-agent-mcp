@@ -60,10 +60,10 @@ Scripts de referencia en `apis/`:
 Ver `.env.example`. Las obligatorias para arrancar:
 
 ```
-TOKEN_AZURE=      # secreto compartido con claude-mcp-jira
-AZURE_PAT=        # Personal Access Token de Azure DevOps
+TOKEN_AZURE=      # PAT de Azure DevOps (también usado como X-Agent-Token y para git)
 AZURE_ORG=        # Organización Azure DevOps (ej. ZurichInsurance-EC)
 AZURE_PROJECT=    # Proyecto default para PR creation
+GIT_USERNAME=     # username para operaciones git HTTPS
 TASKS_DB=         # Path al archivo SQLite (/data/tasks.db en Docker, /tmp/... en local)
 ```
 

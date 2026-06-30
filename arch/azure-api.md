@@ -138,7 +138,7 @@ El agente normaliza estos valores al contrato del endpoint `GET /azure/pull-requ
 
 ## Smoke tests
 
-Ver `tests/curl/azure.sh` — requiere `AZURE_PAT` en el entorno:
+Ver `tests/curl/azure.sh` — requiere `TOKEN_AZURE` en el entorno:
 
 ```bash
 source .env.local

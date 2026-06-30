@@ -116,7 +116,7 @@ Variables de entorno que necesita el caller:
 
 ```
 CODE_AGENT_URL=http://localhost:5001   # URL del agente (5001 en local)
-CODE_AGENT_TOKEN=                      # mismo valor que TOKEN_AZURE del agente
+TOKEN_AZURE=                           # PAT de Azure DevOps del agente (el mismo que usa el agente)
 ```
 
 ### MCP tools que consume `claude-mcp-jira`
