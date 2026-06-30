@@ -703,6 +703,54 @@ def set_repo_branch_map(repo_name: str):
     return jsonify(updated)
 
 
+@app.patch("/repos/<repo_name>/local-path")
+@require_token
+def set_repo_local_path(repo_name: str):
+    """Update the local_path of a registered repo without re-inspecting.
+    ---
+    tags: [Repositories]
+    parameters:
+      - in: path
+        name: repo_name
+        type: string
+        required: true
+        example: ov-arizona-backend-ecuador
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            local_path:
+              type: string
+              example: /home/idavid/dev/ov/ov-arizona-backend-ecuador
+    responses:
+      200:
+        description: Updated repo record
+        schema: {type: object}
+      400:
+        description: local_path is required
+      404:
+        description: Repository not found
+    """
+    body = request.get_json(silent=True) or {}
+    local_path = (body.get("local_path") or "").strip() or None
+    if not local_path:
+        return jsonify({"error": "local_path is required"}), 400
+
+    repo = repo_store.get_by_name(repo_name)
+    if not repo:
+        return jsonify({"error": f"Repository '{repo_name}' not found"}), 404
+
+    now = _now_iso()
+    repo_store.set_local_path(repo["repo_id"], local_path, now)
+    log("REPO", f"'{repo_name}' local_path updated: {local_path}")
+
+    updated = repo_store.get(repo["repo_id"])
+    updated["branches_by_role"] = _invert_roles(updated.get("branch_roles") or {})
+    return jsonify(updated)
+
+
 @app.post("/repos/<repo_name>/refresh")
 @require_token
 def refresh_repo(repo_name: str):

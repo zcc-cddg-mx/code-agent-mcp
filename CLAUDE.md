@@ -66,6 +66,7 @@ Every endpoint requires `X-Agent-Token` header (value = `TOKEN_AZURE` env var). 
 | `DELETE` | `/repos/<name>` | Remove from registry |
 | `PATCH` | `/repos/<name>/branches/<path:branch>` | Override branch role: `base`/`integration`/`feature`/`other` |
 | `PATCH` | `/repos/<name>/branch-map` | Set target→branch mapping for this repo (e.g. `{"prod": "develop"}`) |
+| `PATCH` | `/repos/<name>/local-path` | Update `local_path` without re-inspecting (useful when Azure PAT is expired) |
 | `GET` | `/projects` | List projects (with repos list) |
 | `GET` | `/projects/<org>/<name>` | Get project by slug |
 | `GET` | `/config/branches` | Get branch registry |

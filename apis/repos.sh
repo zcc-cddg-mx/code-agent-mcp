@@ -59,8 +59,15 @@ case "${1:-list}" in
       -d "$BRANCH_MAP" | python3 -m json.tool
     ;;
 
+  set-local-path)
+    REPO_NAME="${REPO_NAME:?set REPO_NAME env var}"
+    LOCAL_PATH="${LOCAL_PATH:?set LOCAL_PATH env var}"
+    curl -s -X PATCH "$BASE/repos/$REPO_NAME/local-path" "${H[@]}" \
+      -d "{\"local_path\":\"$LOCAL_PATH\"}" | python3 -m json.tool
+    ;;
+
   *)
-    echo "Usage: $0 {register|list|get|refresh|delete|set-role|set-branch-map}"
+    echo "Usage: $0 {register|list|get|refresh|delete|set-role|set-branch-map|set-local-path}"
     exit 1
     ;;
 esac

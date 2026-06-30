@@ -156,6 +156,14 @@ def set_branch_map(repo_id: str, branch_map: dict, now_iso: str) -> None:
         )
 
 
+def set_local_path(repo_id: str, local_path: str | None, now_iso: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE repos SET local_path = ?, updated_at = ? WHERE repo_id = ?",
+            (local_path, now_iso, repo_id),
+        )
+
+
 def delete(repo_id: str) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM repos WHERE repo_id = ?", (repo_id,))
